@@ -25,3 +25,5 @@ caddy-dist
 # IDE files
 .idea/
 .vscode/
+
+.pc
