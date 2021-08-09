@@ -1,0 +1,50 @@
+Source: caddy
+Maintainer: Debian Go Packaging Team <team+pkg-go@tracker.debian.org>
+Uploaders: Peymaneh Nejad <p.nejad@posteo.de>
+Section: golang
+Testsuite: autopkgtest-pkg-go
+Priority: optional
+Build-Depends: debhelper-compat (= 13),
+               dh-golang,
+               golang-any,
+               golang-github-masterminds-sprig-dev,
+               golang-github-alecthomas-chroma-dev,
+               golang-github-aryann-difflib-dev,
+               golang-github-caddyserver-certmagic-dev,
+               golang-github-go-chi-chi-dev,
+               golang-github-google-cel-go-dev,
+               golang-github-google-uuid-dev,
+               golang-github-lucas-clemente-quic-go-dev,
+               golang-github-klauspost-compress-dev,
+               golang-github-klauspost-cpuid-dev (>= 2.0.6),
+               golang-github-mholt-acmez-dev,
+               golang-github-naoina-toml-dev,
+               golang-github-prometheus-client-golang-dev,
+               golang-github-smallstep-certificates-dev,
+               golang-github-smallstep-cli-dev,
+               golang-github-smallstep-nosql-dev,
+               golang-github-smallstep-truststore-dev,
+               golang-github-yuin-goldmark-dev,
+               golang-github-yuin-goldmark-highlighting-dev,
+               golang-go.uber-zap-dev,
+               golang-golang-x-crypto-dev,
+               golang-golang-x-net-dev,
+               golang-golang-x-term-dev,
+               golang-google-genproto-dev,
+               golang-google-protobuf-dev,
+               golang-gopkg-natefinch-lumberjack.v2-dev,
+               golang-gopkg-yaml.v2-dev
+Standards-Version: 4.5.1
+Vcs-Browser: https://salsa.debian.org/go-team/packages/caddy
+Vcs-Git: https://salsa.debian.org/go-team/packages/caddy.git
+Homepage: https://github.com/caddyserver/caddy
+Rules-Requires-Root: no
+XS-Go-Import-Path: github.com/caddyserver/caddy
+
+Package: caddy
+Architecture: any
+Depends: ${misc:Depends},
+         ${shlibs:Depends}
+Built-Using: ${misc:Built-Using}
+Description: Fast, multi-platform web server with automatic HTTPS
+
