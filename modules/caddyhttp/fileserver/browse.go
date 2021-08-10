@@ -22,6 +22,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/caddyserver/caddy/v2"
@@ -34,8 +35,6 @@ import (
 type Browse struct {
 	// Use this template file instead of the default browse template.
 	TemplateFile string `json:"template_file,omitempty"`
-
-	template *template.Template
 }
 
 func (fsrv *FileServer) serveBrowse(root, dirPath string, w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
@@ -43,15 +42,28 @@ func (fsrv *FileServer) serveBrowse(root, dirPath string, w http.ResponseWriter,
 		zap.String("path", dirPath),
 		zap.String("root", root))
 
-	// navigation on the client-side gets messed up if the
-	// URL doesn't end in a trailing slash because hrefs like
-	// "/b/c" on a path like "/a" end up going to "/b/c" instead
+	// Navigation on the client-side gets messed up if the
+	// URL doesn't end in a trailing slash because hrefs to
+	// "b/c" at path "/a" end up going to "/b/c" instead
 	// of "/a/b/c" - so we have to redirect in this case
-	if !strings.HasSuffix(r.URL.Path, "/") {
-		fsrv.logger.Debug("redirecting to trailing slash to preserve hrefs", zap.String("request_path", r.URL.Path))
-		r.URL.Path += "/"
-		http.Redirect(w, r, r.URL.String(), http.StatusMovedPermanently)
-		return nil
+	// so that the path is "/a/" and the client constructs
+	// relative hrefs "b/c" to be "/a/b/c".
+	//
+	// Only redirect if the last element of the path (the filename) was not
+	// rewritten; if the admin wanted to rewrite to the canonical path, they
+	// would have, and we have to be very careful not to introduce unwanted
+	// redirects and especially redirect loops! (Redirecting using the
+	// original URI is necessary because that's the URI the browser knows,
+	// we don't want to redirect from internally-rewritten URIs.)
+	// See https://github.com/caddyserver/caddy/issues/4205.
+	origReq := r.Context().Value(caddyhttp.OriginalRequestCtxKey).(http.Request)
+	if path.Base(origReq.URL.Path) == path.Base(r.URL.Path) {
+		if !strings.HasSuffix(origReq.URL.Path, "/") {
+			fsrv.logger.Debug("redirecting to trailing slash to preserve hrefs", zap.String("request_path", r.URL.Path))
+			origReq.URL.Path += "/"
+			http.Redirect(w, r, origReq.URL.String(), http.StatusMovedPermanently)
+			return nil
+		}
 	}
 
 	dir, err := fsrv.openFile(dirPath, w)
@@ -75,11 +87,14 @@ func (fsrv *FileServer) serveBrowse(root, dirPath string, w http.ResponseWriter,
 
 	fsrv.browseApplyQueryParams(w, r, &listing)
 
-	// write response as either JSON or HTML
-	var buf *bytes.Buffer
+	buf := bufPool.Get().(*bytes.Buffer)
+	defer bufPool.Put(buf)
+
 	acceptHeader := strings.ToLower(strings.Join(r.Header["Accept"], ","))
+
+	// write response as either JSON or HTML
 	if strings.Contains(acceptHeader, "application/json") {
-		if buf, err = fsrv.browseWriteJSON(listing); err != nil {
+		if err := json.NewEncoder(buf).Encode(listing.Items); err != nil {
 			return caddyhttp.Error(http.StatusInternalServerError, err)
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -98,12 +113,11 @@ func (fsrv *FileServer) serveBrowse(root, dirPath string, w http.ResponseWriter,
 			browseTemplateContext: listing,
 		}
 
-		err = fsrv.makeBrowseTemplate(tplCtx)
+		tpl, err := fsrv.makeBrowseTemplate(tplCtx)
 		if err != nil {
 			return fmt.Errorf("parsing browse template: %v", err)
 		}
-
-		if buf, err = fsrv.browseWriteHTML(tplCtx); err != nil {
+		if err := tpl.Execute(buf, tplCtx); err != nil {
 			return caddyhttp.Error(http.StatusInternalServerError, err)
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -161,7 +175,7 @@ func (fsrv *FileServer) browseApplyQueryParams(w http.ResponseWriter, r *http.Re
 }
 
 // makeBrowseTemplate creates the template to be used for directory listings.
-func (fsrv *FileServer) makeBrowseTemplate(tplCtx *templateContext) error {
+func (fsrv *FileServer) makeBrowseTemplate(tplCtx *templateContext) (*template.Template, error) {
 	var tpl *template.Template
 	var err error
 
@@ -169,33 +183,17 @@ func (fsrv *FileServer) makeBrowseTemplate(tplCtx *templateContext) error {
 		tpl = tplCtx.NewTemplate(path.Base(fsrv.Browse.TemplateFile))
 		tpl, err = tpl.ParseFiles(fsrv.Browse.TemplateFile)
 		if err != nil {
-			return fmt.Errorf("parsing browse template file: %v", err)
+			return nil, fmt.Errorf("parsing browse template file: %v", err)
 		}
 	} else {
 		tpl = tplCtx.NewTemplate("default_listing")
 		tpl, err = tpl.Parse(defaultBrowseTemplate)
 		if err != nil {
-			return fmt.Errorf("parsing default browse template: %v", err)
+			return nil, fmt.Errorf("parsing default browse template: %v", err)
 		}
 	}
 
-	fsrv.Browse.template = tpl
-
-	return nil
-}
-
-func (fsrv *FileServer) browseWriteJSON(listing browseTemplateContext) (*bytes.Buffer, error) {
-	buf := bufPool.Get().(*bytes.Buffer)
-	defer bufPool.Put(buf)
-	err := json.NewEncoder(buf).Encode(listing.Items)
-	return buf, err
-}
-
-func (fsrv *FileServer) browseWriteHTML(tplCtx *templateContext) (*bytes.Buffer, error) {
-	buf := bufPool.Get().(*bytes.Buffer)
-	defer bufPool.Put(buf)
-	err := fsrv.Browse.template.Execute(buf, tplCtx)
-	return buf, err
+	return tpl, nil
 }
 
 // isSymlink return true if f is a symbolic link
@@ -209,7 +207,7 @@ func isSymlinkTargetDir(f os.FileInfo, root, urlPath string) bool {
 	if !isSymlink(f) {
 		return false
 	}
-	target := sanitizedPathJoin(root, path.Join(urlPath, f.Name()))
+	target := caddyhttp.SanitizedPathJoin(root, path.Join(urlPath, f.Name()))
 	targetInfo, err := os.Stat(target)
 	if err != nil {
 		return false
@@ -223,4 +221,11 @@ func isSymlinkTargetDir(f os.FileInfo, root, urlPath string) bool {
 type templateContext struct {
 	templates.TemplateContext
 	browseTemplateContext
+}
+
+// bufPool is used to increase the efficiency of file listings.
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
 }
