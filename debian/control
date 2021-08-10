@@ -46,5 +46,14 @@ Architecture: any
 Depends: ${misc:Depends},
          ${shlibs:Depends}
 Built-Using: ${misc:Built-Using}
-Description: Fast, multi-platform web server with automatic HTTPS
-
+Description: Fast, lightweight web server with automatic HTTPS
+ Caddy is a multi purpose web server written in Go.
+ .
+ Features:
+  - Easy configuration
+  - Automatic HTTPS by default
+     - ZeroSSL and Let's Encrypt for public names
+     - Fully-managed local CA for internal names & IPs
+     - Can coordinate with other Caddy instances in a cluster
+     - Multi-issuer fallback
+  - HTTP/1.1, HTTP/2, and experimental HTTP/3 support
