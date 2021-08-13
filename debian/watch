@@ -1,7 +1,7 @@
 version=4
 opts="filenamemangle=s%(?:.*?)?v?(\d[\d.]*)\.tar\.gz%caddy-$1.tar.gz%,\
       uversionmangle=s/(\d)[_\.\-\+]?(RC|rc|pre|dev|beta|alpha)[.]?(\d*)$/\$1~\$2\$3/" \
-  https://github.com/caddyserver/caddy/tags .*/v?(\d\S*)\.tar\.gz debian
-opts="mode=git, gitmode=full, pgpmode=none, component=dist" \
+  https://github.com/caddyserver/caddy/tags .*/v?(\d\S*)\.tar\.gz group
+opts="mode=git, pgpmode=none, component=dist" \
        https://github.com/caddyserver/dist.git \
-       refs/tags/v([\d\.]+) same
+       HEAD group
