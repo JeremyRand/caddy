@@ -8,3 +8,8 @@ export DH_GOLANG_INSTALL_EXTRA := caddytest/integration/caddyfile_adapt caddy.lo
 
 override_dh_auto_install:
 	dh_auto_install -- --no-source
+
+override_dh_install:
+	dh_install
+	mv debian/caddy/usr/share/bash-completion/completions/bash-completion \
+	    debian/caddy/usr/share/bash-completion/completions/caddy

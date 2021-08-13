@@ -1,0 +1,17 @@
+From: Peymaneh Nejad <p.nejad@posteo.de>
+Date: Fri, 13 Aug 2021 18:25:55 +0200
+Subject: Remove shebang from bash completion
+
+---
+ dist/scripts/completions/bash-completion | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/dist/scripts/completions/bash-completion b/dist/scripts/completions/bash-completion
+index 1da7f36..87a3d88 100644
+--- a/dist/scripts/completions/bash-completion
++++ b/dist/scripts/completions/bash-completion
+@@ -1,4 +1,3 @@
+-#!/usr/bin/env bash
+ 
+ # helper method
+ declare -f _contains_element > /dev/null || _contains_element() {
