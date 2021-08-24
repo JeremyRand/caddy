@@ -1,0 +1,42 @@
+From: Peymaneh Nejad <p.nejad@posteo.de>
+Date: Tue, 24 Aug 2021 19:24:10 +0200
+Subject: Remove commands 'build-info' and 'upgrade'
+
+---
+ cmd/commands.go | 16 ----------------
+ 1 file changed, 16 deletions(-)
+
+diff --git a/cmd/commands.go b/cmd/commands.go
+index 36e9c04..a7b9a2f 100644
+--- a/cmd/commands.go
++++ b/cmd/commands.go
+@@ -206,12 +206,6 @@ config file; otherwise the default is assumed.`,
+ 		}(),
+ 	})
+ 
+-	RegisterCommand(Command{
+-		Name:  "build-info",
+-		Func:  cmdBuildInfo,
+-		Short: "Prints information about this build",
+-	})
+-
+ 	RegisterCommand(Command{
+ 		Name:  "environ",
+ 		Func:  cmdEnviron,
+@@ -281,16 +275,6 @@ is always printed to stdout.`,
+ 			return fs
+ 		}(),
+ 	})
+-
+-	RegisterCommand(Command{
+-		Name:  "upgrade",
+-		Func:  cmdUpgrade,
+-		Short: "Upgrade Caddy (EXPERIMENTAL)",
+-		Long: `
+-Downloads an updated Caddy binary with the same modules/plugins at the
+-latest versions. EXPERIMENTAL: May be changed or removed.`,
+-	})
+-
+ }
+ 
+ // RegisterCommand registers the command cmd.
