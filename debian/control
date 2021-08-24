@@ -1,7 +1,7 @@
 Source: caddy
 Maintainer: Debian Go Packaging Team <team+pkg-go@tracker.debian.org>
 Uploaders: Peymaneh Nejad <p.nejad@posteo.de>
-Section: golang
+Section: httpd
 Testsuite: autopkgtest-pkg-go
 Priority: optional
 Build-Depends: debhelper-compat (= 13),
