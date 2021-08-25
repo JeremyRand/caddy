@@ -1,0 +1,92 @@
+.TH "CADDY-RUN" "1" "August 2021"
+.SH NAME
+.HP
+caddy-run \- Starts the Caddy process and blocks indefinitely
+.SH SYNOPSIS
+.HP
+caddy run [--config <path> [--adapter <name>]] [--envfile <path>] [--environ] [--resume] [--watch] [--pidfile <fil>]
+.SH DESCRIPTION
+.PP 
+Starts the Caddy process, optionally bootstrapped with an initial config file,
+and blocks indefinitely until the server is stopped; i.e. runs Caddy in
+"daemon" mode (foreground).
+
+If a config file is specified, it will be applied immediately after the process
+is running. If the config file is not in Caddy's native JSON format, you can
+specify an adapter with --adapter to adapt the given config file to
+Caddy's native format. The config adapter must be a registered module. Any
+warnings will be printed to the log, but beware that any adaptation without
+errors will immediately be used. If you want to review the results of the
+adaptation first, use the 'adapt' subcommand.
+
+As a special case, if the current working directory has a file called
+"Caddyfile" and the caddyfile config adapter is plugged in (default), then
+that file will be loaded and used to configure Caddy, even without any command
+line flags.
+
+If --envfile is specified, an environment file with environment variables in
+the KEY=VALUE format will be loaded into the Caddy process.
+
+If --environ is specified, the environment as seen by the Caddy process will
+be printed before starting. This is the same as the environ command but does
+not quit after printing, and can be useful for troubleshooting.
+
+The --resume flag will override the --config flag if there is a config auto-
+save file. It is not an error if --resume is used and no autosave file exists.
+
+If --watch is specified, the config file will be loaded automatically after
+changes. ⚠️ This is dangerous in production! Only use this option in a local
+development environment.
+.SH OPTIONS
+.HP
+\fB-adapter\fR <string>
+.RS
+Name of config adapter to apply
+.RE 
+.HP
+\fB-config\fR <string>
+.RS
+Configuration file
+.RE 
+.HP
+\fB-envfile\fR <string>
+.RS
+Environment file to load
+.RE 
+.HP
+\fB-environ\fR <string>
+.RS
+Print environment
+.RE 
+.HP
+\fB-pidfile\fR <string>
+.RS
+Path of file to which to write process ID
+.RE 
+.HP
+\fB-pingback\fR <string>
+.RS
+Echo confirmation bytes to this address on success
+.RE 
+.HP
+\fB-resume\fR <string>
+.RS
+Use saved config, if any (and prefer over --config file)
+.RE 
+.HP
+\fB-watch\fR <string>
+.RS
+Watch config file for changes and reload it automatically
+.RE  
+.SH SEE ALSO
+caddy-adapt(1), caddy-environ(1), caddy-file-server(1), caddy-fmt(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reload(1), caddy-reverse-proxy(1), caddy-start(1), caddy-stop(1), caddy-trust(1), caddy-untrust(1), caddy-validate(1)
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors

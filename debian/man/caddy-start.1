@@ -1,0 +1,56 @@
+.TH "CADDY-START" "1" "August 2021"
+.SH NAME
+.HP
+caddy-start \- Starts the Caddy process in the background and then returns
+.SH SYNOPSIS
+.HP
+caddy start [--config <path> [--adapter <name>]] [--envfile <path>] [--watch] [--pidfile <file>]
+.SH DESCRIPTION
+.PP 
+Starts the Caddy process, optionally bootstrapped with an initial config file.
+This command unblocks after the server starts running or fails to run.
+
+If --envfile is specified, an environment file with environment variables in
+the KEY=VALUE format will be loaded into the Caddy process.
+
+On Windows, the spawned child process will remain attached to the terminal, so
+closing the window will forcefully stop Caddy; to avoid forgetting this, try
+using 'caddy run' instead to keep it in the foreground.
+.SH OPTIONS
+.HP
+\fB-adapter\fR <string>
+.RS
+Name of config adapter to apply
+.RE 
+.HP
+\fB-config\fR <string>
+.RS
+Configuration file
+.RE 
+.HP
+\fB-envfile\fR <string>
+.RS
+Environment file to load
+.RE 
+.HP
+\fB-pidfile\fR <string>
+.RS
+Path of file to which to write process ID
+.RE 
+.HP
+\fB-watch\fR <string>
+.RS
+Reload changed config file automatically
+.RE  
+.SH SEE ALSO
+caddy-adapt(1), caddy-environ(1), caddy-file-server(1), caddy-fmt(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reload(1), caddy-reverse-proxy(1), caddy-run(1), caddy-stop(1), caddy-trust(1), caddy-untrust(1), caddy-validate(1)
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors

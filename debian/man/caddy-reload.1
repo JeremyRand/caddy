@@ -1,0 +1,49 @@
+.TH "CADDY-RELOAD" "1" "August 2021"
+.SH NAME
+.HP
+caddy-reload \- Changes the config of the running Caddy instance
+.SH SYNOPSIS
+.HP
+caddy reload --config <path> [--adapter <name>] [--address <interface>]
+.SH DESCRIPTION
+.PP 
+Gives the running Caddy instance a new configuration. This has the same effect
+as POSTing a document to the /load API endpoint, but is convenient for simple
+workflows revolving around config files.
+
+Since the admin endpoint is configurable, the endpoint configuration is loaded
+from the --address flag if specified; otherwise it is loaded from the given
+config file; otherwise the default is assumed.
+.SH OPTIONS
+.HP
+\fB-adapter\fR <string>
+.RS
+Name of config adapter to apply
+.RE 
+.HP
+\fB-address\fR <string>
+.RS
+Address of the administration listener, if different from config
+.RE 
+.HP
+\fB-config\fR <string>
+.RS
+Configuration file (required)
+.RE 
+.HP
+\fB-force\fR <string>
+.RS
+Force config reload, even if it is the same
+.RE  
+.SH SEE ALSO
+caddy-adapt(1), caddy-environ(1), caddy-file-server(1), caddy-fmt(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reverse-proxy(1), caddy-run(1), caddy-start(1), caddy-stop(1), caddy-trust(1), caddy-untrust(1), caddy-validate(1)
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors

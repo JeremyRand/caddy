@@ -1,0 +1,51 @@
+.TH "CADDY-ADAPT" "1" "August 2021"
+.SH NAME
+.HP
+caddy-adapt \- Adapts a configuration to Caddy's native JSON
+.SH SYNOPSIS
+.HP
+caddy adapt --config <path> [--adapter <name>] [--pretty] [--validate]
+.SH DESCRIPTION
+.PP 
+Adapts a configuration to Caddy's native JSON format and writes the
+output to stdout, along with any warnings to stderr.
+
+If --pretty is specified, the output will be formatted with indentation
+for human readability.
+
+If --validate is used, the adapted config will be checked for validity.
+If the config is invalid, an error will be printed to stderr and a non-
+zero exit status will be returned.
+.SH OPTIONS
+.HP
+\fB-adapter\fR <string>
+.RS
+Name of config adapter
+.RE 
+.HP
+\fB-config\fR <string>
+.RS
+Configuration file to adapt (required)
+.RE 
+.HP
+\fB-pretty\fR <string>
+.RS
+Format the output for human readability
+.RE 
+.HP
+\fB-validate\fR <string>
+.RS
+Validate the output
+.RE  
+.SH SEE ALSO
+caddy-environ(1), caddy-file-server(1), caddy-fmt(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reload(1), , caddy-reverse-proxy(1), caddy-run(1), caddy-start(1), caddy-stop(1), caddy-trust(1), caddy-untrust(1), caddy-validate(1)
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors

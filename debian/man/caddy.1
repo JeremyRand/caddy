@@ -1,0 +1,101 @@
+.TH "CADDY" "1" "August 2021"
+.SH NAME
+.HP
+caddy \- an extensible server platform
+.SH SYNOPSIS
+.HP
+caddy <command> [<args...>]
+.SH COMMANDS
+.PP 
+These are available commands to use with caddy. See their manpages
+for usage and available flags.
+.HP
+\fBadapt\fR
+.RS
+Adapts a configuration to Caddy's native JSON. See \fBcaddy-adapt\fR(1)
+.RE
+.HP
+\fBenviron\fR
+.RS
+Prints the environment. See \fBcaddy-environ\fR(1)
+.RE
+.HP
+\fBfile-server\fR
+.RS
+Spins up a production-ready file server. See \fBcaddy-file-server\fR(1)
+.RE
+.HP
+\fBfmt\fR
+.RS
+Formats a Caddyfile. See \fBcaddy-fmt\fR(1)
+.RE
+.HP
+\fBhash-password\fR
+.RS
+Hashes a password and writes base64. See \fBcaddy-hash-password\fR(1)
+.RE
+.HP
+\fBhelp\fR
+.RS
+Shows help for a Caddy subcommand. See \fBcaddy-help\fR(1)
+.RE
+.HP
+\fBlist-modules\fR
+.RS
+Lists the installed Caddy modules. See \fBcaddy-list-modules\fR(1)
+.RE
+.HP
+\fBreload\fR
+.RS
+Changes the config of the running Caddy instance. See \fBcaddy-reload\fR(1)
+.RE
+.HP
+\fBreverse-proxy\fR
+.RS
+A quick and production-ready reverse proxy. See \fBcaddy-reverse-proxy\fR(1)
+.RE
+.HP
+\fBrun\fR
+.RS
+Starts the Caddy process and blocks indefinitely. See \fBcaddy-run\fR(1)
+.RE
+.HP
+\fBstart\fR
+.RS
+Starts the Caddy process in the background and then returns. See \fBcaddy-start\fR(1)
+.RE
+.HP
+\fBstop\fR
+.RS
+Gracefully stops a started Caddy process. See \fBcaddy-stop\fR(1)
+.RE
+.HP
+\fBtrust\fR
+.RS
+Installs a CA certificate into local trust stores. See \fBcaddy-trust\fR(1)
+.RE
+.HP
+\fBuntrust\fR
+.RS
+Untrusts a locally-trusted CA certificate. See \fBcaddy-untrust\fR(1)
+.RE
+.HP
+\fBvalidate\fR
+.RS
+Tests whether a configuration file is valid. See \fBcaddy-validate\fR(1)
+.RE
+.HP
+\fBversion\fR
+.RS
+Prints the version.
+.RE
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors

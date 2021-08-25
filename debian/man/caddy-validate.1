@@ -1,0 +1,35 @@
+.TH "CADDY-VALIDATE" "1" "August 2021"
+.SH NAME
+.HP
+caddy-validate \- Tests whether a configuration file is valid
+.SH SYNOPSIS
+.HP
+caddy validate --config <path> [--adapter <name>]
+.SH DESCRIPTION
+.PP 
+Loads and provisions the provided config, but does not start running it.
+This reveals any errors with the configuration through the loading and
+provisioning stages.
+.SH OPTIONS
+.HP
+\fB-adapter\fR <string>
+.RS
+Name of config adapter
+.RE 
+.HP
+\fB-config\fR <string>
+.RS
+Input configuration file
+.RE  
+.SH SEE ALSO
+caddy-adapt(1), caddy-environ(1), caddy-file-server(1), caddy-fmt(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reload(1), caddy-reverse-proxy(1), caddy-run(1), caddy-start(1), caddy-stop(1), caddy-trust(1), caddy-untrust(1)
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors

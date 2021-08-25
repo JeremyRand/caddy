@@ -1,0 +1,36 @@
+.TH "CADDY-FMT" "1" "August 2021"
+.SH NAME
+.HP
+caddy-fmt \- Formats a Caddyfile
+.SH SYNOPSIS
+.HP
+caddy fmt [--overwrite] [<path>]
+.SH DESCRIPTION
+.PP 
+Formats the Caddyfile by adding proper indentation and spaces to improve
+human readability. It prints the result to stdout.
+
+If --overwrite is specified, the output will be written to the config file
+directly instead of printing it.
+
+If you wish you use stdin instead of a regular file, use - as the path.
+When reading from stdin, the --overwrite flag has no effect: the result
+is always printed to stdout.
+.SH OPTIONS
+.HP
+\fB-overwrite\fR <string>
+.RS
+Overwrite the input file with the results
+.RE  
+.SH SEE ALSO
+caddy-adapt(1), caddy-environ(1), caddy-file-server(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reload(1), caddy-reverse-proxy(1), caddy-run(1), caddy-start(1), caddy-stop(1), caddy-trust(1), caddy-untrust(1), caddy-validate(1) 
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors

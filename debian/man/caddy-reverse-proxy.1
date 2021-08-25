@@ -1,0 +1,58 @@
+.TH "CADDY-REVERSE-PROXY" "1" "August 2021"
+.SH NAME
+.HP
+caddy-reverse-proxy \- A quick and production-ready reverse proxy
+.SH SYNOPSIS
+.HP
+caddy reverse-proxy [--from <addr>] [--to <addr>] [--change-host-header]
+.SH DESCRIPTION
+.PP 
+A simple but production-ready reverse proxy. Useful for quick deployments,
+demos, and development.
+
+Simply shuttles HTTP(S) traffic from the --from address to the --to address.
+
+Unless otherwise specified in the addresses, the --from address will be
+assumed to be HTTPS if a hostname is given, and the --to address will be
+assumed to be HTTP.
+
+If the --from address has a host or IP, Caddy will attempt to serve the
+proxy over HTTPS with a certificate (unless overridden by the HTTP scheme
+or port).
+
+If --change-host-header is set, the Host header on the request will be modified
+from its original incoming value to the address of the upstream. (Otherwise, by
+default, all incoming headers are passed through unmodified.)
+.SH OPTIONS
+.HP
+\fB-change-host-header\fR <string>
+.RS
+Set upstream Host header to address of upstream
+.RE 
+.HP
+\fB-from\fR <string>
+.RS
+Address on which to receive traffic
+.RE 
+.HP
+\fB-insecure\fR <string>
+.RS
+Disable TLS verification (WARNING: DISABLES SECURITY, WHY ARE YOU EVEN USING TLS?)
+.RE 
+.HP
+\fB-to\fR <string>
+.RS
+Upstream address to which to to proxy traffic
+.RE  
+.SH SEE ALSO
+caddy-adapt(1), caddy-environ(1), caddy-file-server(1), caddy-fmt(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reload(1), caddy-run(1), caddy-start(1), caddy-stop(1), caddy-trust(1), caddy-untrust(1), caddy-validate(1)
+.HP
+.SH DOCUMENTATION
+Full documentation is available at:
+https://caddyserver.com/docs/
+.SH BUGS
+.HP
+Report Bugs to https://github.com/caddyserver/caddy
+.SH COPYRIGHT
+.HP
+(c) Matthew Holt and The Caddy Authors
