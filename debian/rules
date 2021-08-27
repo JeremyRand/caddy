@@ -1,7 +1,9 @@
 #!/usr/bin/make -f
 
 #export DH_VERBOSE := 1
-export DH_GOLANG_INSTALL_EXTRA := caddytest/integration/caddyfile_adapt caddy.localhost.crt caddytest/caddy.ca.cer
+export DH_GOLANG_INSTALL_EXTRA := caddytest
+export DH_GOLANG_EXCLUDES := integration
+export CGO_ENABLED := 0
 
 %:
 	dh $@ --builddirectory=_build --buildsystem=golang --with=golang
