@@ -1,0 +1,35 @@
+Caddy for Debian
+================
+
+Command line usage
+==================
+
+See caddy(1) for available subcommands and caddy-<subcommand>(1) for usage and
+available flags of its respective <subcommand>.
+
+Documentation
+=============
+
+An extensive documentation to Caddy can be found at https://caddyserver.com/docs
+
+Caddyfile
+=========
+
+A default configuration file is installed to `/etc/caddy/Caddyfile`.
+See https://caddyserver.com/docs/caddyfile to learn more about the Caddyfile.
+
+Systemd
+=======
+
+Two Systemd unit files written by its upstream authors are installed:
+- `/usr/lib/systemd/system/caddy.service`
+- `/usr/lib/systemd/system/caddy-api.service`
+The first will read the configuration from `/etc/caddy/Caddyfile`.
+The latter will be controlled via its API and without a configuration file.
+
+Changes to upstream
+===================
+
+The Caddy binary installed to `/usr/bin/caddy` does not does provide the
+subcommands `build-info` and `upgrade`.
+For upgrading Caddy use the APT package manager.
