@@ -1,0 +1,31 @@
+From: Peymaneh Nejad <p.nejad@posteo.de>
+Date: Mon, 30 Aug 2021 15:06:41 +0200
+Subject: Add var Version
+
+---
+ cmd/main.go | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/cmd/main.go b/cmd/main.go
+index 14408fa..4dde241 100644
+--- a/cmd/main.go
++++ b/cmd/main.go
+@@ -37,6 +37,8 @@ import (
+ 	"go.uber.org/zap"
+ )
+ 
++var Version string
++
+ func init() {
+ 	// set a fitting User-Agent for ACME requests
+ 	goModule := caddy.GoModule()
+@@ -436,6 +438,9 @@ func printEnvironment() {
+ func caddyVersion() string {
+ 	goModule := caddy.GoModule()
+ 	ver := goModule.Version
++        if Version != "" {
++                ver = Version
++        }
+ 	if goModule.Sum != "" {
+ 		ver += " " + goModule.Sum
+ 	}

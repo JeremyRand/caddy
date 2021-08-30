@@ -6,8 +6,15 @@ export DH_GOLANG_INSTALL_EXTRA := caddytest
 export DH_GOLANG_EXCLUDES := integration
 export CGO_ENABLED := 0
 
+include /usr/share/dpkg/pkg-info.mk
+VERSION = $(shell echo $(DEB_VERSION) | cut -d+ -f1)
+LDFLAGS := -ldflags '-X $(DH_GOPKG)/cmd.Version=$(VERSION)'
+
 %:
 	dh $@ --builddirectory=_build --buildsystem=golang --with=golang
+
+override_dh_auto_build:
+	dh_auto_build -- $(LDFLAGS)
 
 override_dh_auto_install:
 	dh_auto_install -- --no-source
