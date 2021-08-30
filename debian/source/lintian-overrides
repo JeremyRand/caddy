@@ -1,0 +1,4 @@
+patch-not-forwarded-upstream debian/patches/0001-Remove-shebang-from-bash-completion.patch
+patch-not-forwarded-upstream debian/patches/0002-Add-var-Version.patch
+patch-not-forwarded-upstream debian/patches/0003-Remove-commands-build-info-and-upgrade.patch
+maintainer-manual-page
