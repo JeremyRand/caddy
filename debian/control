@@ -1,7 +1,7 @@
 Source: caddy
 Maintainer: Debian Go Packaging Team <team+pkg-go@tracker.debian.org>
-Uploaders: Nilesh Patra <nilesh@debian.org>
-           Peymaneh Nejad <p.nejad@posteo.de>
+Uploaders: Nilesh Patra <nilesh@debian.org>,
+           Peymaneh Nejad <p.nejad@posteo.de>,
 Section: httpd
 Testsuite: autopkgtest-pkg-go
 Priority: optional
