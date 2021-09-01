@@ -1,3 +1,5 @@
 0001-Remove-shebang-from-bash-completion.patch
 0002-Add-var-Version.patch
 0003-Remove-commands-build-info-and-upgrade.patch
+0004-Add-module-for-generating-manual-pages.patch
+0005-Enable-.-doc-module-for-manpages.patch

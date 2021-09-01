@@ -1,0 +1,21 @@
+From: Peymaneh Nejad <p.nejad@posteo.de>
+Date: Wed, 1 Sep 2021 11:34:28 +0200
+Subject: Enable ../doc module for manpages
+Forwarded: not-needed
+
+---
+ cmd/caddy/main.go | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/cmd/caddy/main.go b/cmd/caddy/main.go
+index 2383546..921e21f 100644
+--- a/cmd/caddy/main.go
++++ b/cmd/caddy/main.go
+@@ -31,6 +31,7 @@ import (
+ 
+ 	// plug in Caddy modules here
+ 	_ "github.com/caddyserver/caddy/v2/modules/standard"
++        _ "github.com/caddyserver/caddy/v2/modules/doc"
+ )
+ 
+ func main() {
