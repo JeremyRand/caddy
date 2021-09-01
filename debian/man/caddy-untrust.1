@@ -1,4 +1,4 @@
-.TH "CADDY-UNTRUST" "1" "August 2021"
+.TH "CADDY-UNTRUST" "1" "September 2021"
 .SH NAME
 .HP
 caddy-untrust \- Untrusts a locally-trusted CA certificate
@@ -6,7 +6,7 @@ caddy-untrust \- Untrusts a locally-trusted CA certificate
 .HP
 caddy untrust [--ca <id> | --cert <path>]
 .SH DESCRIPTION
-.PP 
+.PP
 Untrusts a root certificate from the local trust store(s). Intended
 for development environments only.
 
@@ -28,21 +28,24 @@ If no flags are specified, --ca=local is assumed.
 \fB-ca\fR <string>
 .RS
 The ID of the CA to untrust
-.RE 
+.RE
 .HP
 \fB-cert\fR <string>
 .RS
 The path to the CA certificate to untrust
-.RE  
+.RE
 .SH SEE ALSO
-caddy-adapt(1), caddy-environ(1), caddy-file-server(1), caddy-fmt(1), caddy-hash-password(1), caddy-help(1), caddy-list-modules(1), caddy-reload(1), caddy-reverse-proxy(1), caddy-run(1), caddy-start(1), caddy-stop(1), caddy-trust(1), caddy-validate(1)
-.HP
+.PP
+\fBcaddy-adapt\fR(1), \fBcaddy-caddy\fR(1), \fBcaddy-environ\fR(1), \fBcaddy-file-server\fR(1), \fBcaddy-fmt\fR(1), \fBcaddy-hash-password\fR(1), \fBcaddy-help\fR(1), \fBcaddy-list-modules\fR(1), \fBcaddy-man\fR(1), \fBcaddy-reload\fR(1), \fBcaddy-reverse-proxy\fR(1), \fBcaddy-run\fR(1), \fBcaddy-start\fR(1), \fBcaddy-stop\fR(1), \fBcaddy-trust\fR(1), \fBcaddy-validate\fR(1), \fBcaddy-version\fR(1), \fBcaddy\fR(1)
 .SH DOCUMENTATION
-Full documentation is available at:
-https://caddyserver.com/docs/
+.HP
+Full documentation is available at: https://caddyserver.com/docs/
+.SH VERSION
+.HP
+2.4.3
 .SH BUGS
 .HP
-Report Bugs to https://github.com/caddyserver/caddy
+Report Bugs to: https://github.com/caddyserver/caddy
 .SH COPYRIGHT
 .HP
 (c) Matthew Holt and The Caddy Authors
