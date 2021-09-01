@@ -42,7 +42,7 @@ index a7b9a2f..a428904 100644
  
  func init() {
 diff --git a/cmd/main.go b/cmd/main.go
-index 4dde241..e3dae3f 100644
+index 9b80e2a..8631e2b 100644
 --- a/cmd/main.go
 +++ b/cmd/main.go
 @@ -417,7 +417,7 @@ func printEnvironment() {
@@ -64,7 +64,7 @@ index 4dde241..e3dae3f 100644
 +func CaddyVersion() string {
  	goModule := caddy.GoModule()
  	ver := goModule.Version
-         if Version != "" {
+         if version != "" {
 diff --git a/modules/doc/manpages.go b/modules/doc/manpages.go
 new file mode 100644
 index 0000000..40bde19

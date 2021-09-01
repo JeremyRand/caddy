@@ -8,14 +8,14 @@ Forwarded: not-needed
  1 file changed, 5 insertions(+)
 
 diff --git a/cmd/main.go b/cmd/main.go
-index 14408fa..4dde241 100644
+index 14408fa..9b80e2a 100644
 --- a/cmd/main.go
 +++ b/cmd/main.go
 @@ -37,6 +37,8 @@ import (
  	"go.uber.org/zap"
  )
  
-+var Version string
++var version string
 +
  func init() {
  	// set a fitting User-Agent for ACME requests
@@ -24,8 +24,8 @@ index 14408fa..4dde241 100644
  func caddyVersion() string {
  	goModule := caddy.GoModule()
  	ver := goModule.Version
-+        if Version != "" {
-+                ver = Version
++        if version != "" {
++                ver = version
 +        }
  	if goModule.Sum != "" {
  		ver += " " + goModule.Sum
