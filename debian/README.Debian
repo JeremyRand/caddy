@@ -31,5 +31,6 @@ Changes to upstream
 ===================
 
 The Caddy binary installed to `/usr/bin/caddy` does not does provide the
-subcommands `build-info` and `upgrade`.
+subcommands `build-info` and `upgrade` and includes the `man` subcommand which
+generates the manual pages shipped with this pages.
 For upgrading Caddy use the APT package manager.
