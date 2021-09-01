@@ -2,6 +2,7 @@ From: Peymaneh Nejad <p.nejad@posteo.de>
 Date: Tue, 24 Aug 2021 19:24:10 +0200
 Subject: Remove commands 'build-info' and 'upgrade'
 
+Forwarded: not-needed
 ---
  cmd/commands.go | 16 ----------------
  1 file changed, 16 deletions(-)

@@ -1,8 +1,8 @@
 From: Peymaneh Nejad <p.nejad@posteo.de>
 Date: Wed, 1 Sep 2021 11:34:28 +0200
 Subject: Enable ../doc module for manpages
-Forwarded: not-needed
 
+Forwarded: not-needed
 ---
  cmd/caddy/main.go | 1 +
  1 file changed, 1 insertion(+)

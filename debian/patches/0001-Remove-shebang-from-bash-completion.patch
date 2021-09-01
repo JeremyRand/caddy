@@ -2,6 +2,7 @@ From: Peymaneh Nejad <p.nejad@posteo.de>
 Date: Fri, 13 Aug 2021 18:25:55 +0200
 Subject: Remove shebang from bash completion
 
+Forwarded: not-needed
 ---
  dist/scripts/completions/bash-completion | 1 -
  1 file changed, 1 deletion(-)

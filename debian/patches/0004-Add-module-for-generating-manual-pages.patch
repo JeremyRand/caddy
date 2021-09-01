@@ -1,8 +1,8 @@
 From: Peymaneh Nejad <p.nejad@posteo.de>
 Date: Wed, 25 Aug 2021 00:36:55 +0200
 Subject: Add module for generating manual pages
-Forwared: https://github.com/caddyserver/caddy/pull/4316
 
+Forwared: yes
 ---
  cmd/commandfuncs.go     |   2 +-
  cmd/commands.go         |   6 ++
