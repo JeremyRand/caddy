@@ -361,6 +361,11 @@ func loadEnvFromFile(envFile string) error {
 		}
 	}
 
+	// Update the storage paths to ensure they have the proper
+	// value after loading a specified env file.
+	caddy.ConfigAutosavePath = filepath.Join(caddy.AppConfigDir(), "autosave.json")
+	caddy.DefaultStorage = &certmagic.FileStorage{Path: caddy.AppDataDir()}
+
 	return nil
 }
 
@@ -415,7 +420,7 @@ func printEnvironment() {
 	fmt.Printf("caddy.AppDataDir=%s\n", caddy.AppDataDir())
 	fmt.Printf("caddy.AppConfigDir=%s\n", caddy.AppConfigDir())
 	fmt.Printf("caddy.ConfigAutosavePath=%s\n", caddy.ConfigAutosavePath)
-	fmt.Printf("caddy.Version=%s\n", caddyVersion())
+	fmt.Printf("caddy.Version=%s\n", CaddyVersion())
 	fmt.Printf("runtime.GOOS=%s\n", runtime.GOOS)
 	fmt.Printf("runtime.GOARCH=%s\n", runtime.GOARCH)
 	fmt.Printf("runtime.Compiler=%s\n", runtime.Compiler)
@@ -432,8 +437,8 @@ func printEnvironment() {
 	}
 }
 
-// caddyVersion returns a detailed version string, if available.
-func caddyVersion() string {
+// CaddyVersion returns a detailed version string, if available.
+func CaddyVersion() string {
 	goModule := caddy.GoModule()
 	ver := goModule.Version
 	if goModule.Sum != "" {
