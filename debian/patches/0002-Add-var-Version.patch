@@ -8,7 +8,7 @@ Forwarded: not-needed
  1 file changed, 5 insertions(+)
 
 diff --git a/cmd/main.go b/cmd/main.go
-index 14408fa..9b80e2a 100644
+index 8a9a289..58e9b02 100644
 --- a/cmd/main.go
 +++ b/cmd/main.go
 @@ -37,6 +37,8 @@ import (
@@ -20,8 +20,8 @@ index 14408fa..9b80e2a 100644
  func init() {
  	// set a fitting User-Agent for ACME requests
  	goModule := caddy.GoModule()
-@@ -436,6 +438,9 @@ func printEnvironment() {
- func caddyVersion() string {
+@@ -441,6 +443,9 @@ func printEnvironment() {
+ func CaddyVersion() string {
  	goModule := caddy.GoModule()
  	ver := goModule.Version
 +        if version != "" {
