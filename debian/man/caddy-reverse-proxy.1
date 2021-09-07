@@ -25,22 +25,22 @@ from its original incoming value to the address of the upstream. (Otherwise, by
 default, all incoming headers are passed through unmodified.)
 .SH OPTIONS
 .HP
-\fB-change-host-header\fR <string>
+\fB--change-host-header\fR
 .RS
 Set upstream Host header to address of upstream
 .RE
 .HP
-\fB-from\fR <string>
+\fB--from\fR
 .RS
 Address on which to receive traffic
 .RE
 .HP
-\fB-insecure\fR <string>
+\fB--insecure\fR
 .RS
 Disable TLS verification (WARNING: DISABLES SECURITY, WHY ARE YOU EVEN USING TLS?)
 .RE
 .HP
-\fB-to\fR <string>
+\fB--to\fR
 .RS
 Upstream address to which to to proxy traffic
 .RE
@@ -52,7 +52,7 @@ Upstream address to which to to proxy traffic
 Full documentation is available at: https://caddyserver.com/docs/
 .SH VERSION
 .HP
-2.4.3
+2.4.5-1
 .SH BUGS
 .HP
 Report Bugs to: https://github.com/caddyserver/caddy
