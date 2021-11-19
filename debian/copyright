@@ -34,6 +34,11 @@ License: Apache-2.0 and BSD-3-Clause
 Comment: Most of the code in this file was initially borrowed from the Go
  standard library and modified, which is attributed to "The Go Authors"
 
+Files: dist/*
+Copyright: 2015 Matthew Holt and The Caddy Authors
+License: Apache-2.0
+Comment: Repo included as merged orig-file, see debian/watch
+
 Files: debian/*
 Copyright: 2021 Peymaneh Nejad <p.nejad@posteo.de>
 License: Apache-2.0
