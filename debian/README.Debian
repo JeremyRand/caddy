@@ -10,7 +10,7 @@ available flags of its respective <subcommand>.
 Documentation
 =============
 
-An extensive documentation to Caddy can be found at https://caddyserver.com/docs
+An extensive documentation to Caddy can be found at https://caddyserver.com/docs.
 
 Caddyfile
 =========
@@ -33,6 +33,6 @@ Changes to upstream
 The Caddy binary installed to `/usr/bin/caddy` does not does provide the
 subcommands `add-package`, `build-info`, `remove-package` and `upgrade`
 and includes the `man` subcommand which generates the manual pages shipped
-with this pages.
+with this package.
 
 For upgrading Caddy use the APT package manager.
