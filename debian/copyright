@@ -40,7 +40,7 @@ License: Apache-2.0
 Comment: Repo included as merged orig-file, see debian/watch
 
 Files: debian/*
-Copyright: 2021 Peymaneh Nejad <p.nejad@posteo.de>
+Copyright: 2021 Peymaneh <peymaneh@posteo.net>
 License: Apache-2.0
 Comment: Debian packaging is licensed under the same terms as upstream
 
