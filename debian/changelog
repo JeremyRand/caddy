@@ -1,9 +1,14 @@
 caddy (2.4.6-2) experimental; urgency=medium
 
+  [ Peymaneh ]
   * d/control;d/copyright: update maintainer info
   * d/control: relax dependencies
 
- -- Peymaneh <peymaneh@posteo.net>  Mon, 31 Jan 2022 02:28:07 +0100
+  [ Nilesh Patra ]
+  * Remove myself from uploaders
+  * d/lintian-overrides: Remove overrides that are real problems
+
+ -- Peymaneh <peymaneh@posteo.net>  Sat, 02 Apr 2022 15:52:44 +0530
 
 caddy (2.4.6-1) experimental; urgency=medium
 
