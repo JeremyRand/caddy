@@ -30,7 +30,6 @@ Build-Depends: debhelper-compat (= 13),
                golang-golang-x-crypto-dev,
                golang-golang-x-net-dev,
                golang-golang-x-term-dev,
-               golang-google-genproto-dev,
                golang-google-protobuf-dev,
                golang-gopkg-natefinch-lumberjack.v2-dev,
                golang-gopkg-yaml.v2-dev
