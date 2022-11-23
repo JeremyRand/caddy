@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -181,6 +182,95 @@ func TestImport(t *testing.T) {
 
 		if absFilePath != "" {
 			if err := os.Remove(absFilePath); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("Test %d: Expected no error removing temporary test file, got: %v", i, err)
+			}
+		}
+	}
+}
+
+func TestNestedInclude(t *testing.T) {
+	for i, test := range []struct {
+		child      string
+		childFile  string
+		parent     string
+		parentFile string
+		shouldErr  bool
+		expect     string
+		child2     string
+		child2File string
+	}{
+		{
+			// include in parent
+			child:      `{{ include "file1" }}`,
+			childFile:  "file0",
+			parent:     `{{ $content := "file2" }}{{ $p := include $content}}`,
+			parentFile: "file1",
+			shouldErr:  false,
+			expect:     ``,
+			child2:     `This shouldn't show`,
+			child2File: "file2",
+		},
+	} {
+		context := getContextOrFail(t)
+		var absFilePath string
+		var absFilePath0 string
+		var absFilePath1 string
+		var buf *bytes.Buffer
+		var err error
+
+		// create files and for test case
+		if test.parentFile != "" {
+			absFilePath = filepath.Join(fmt.Sprintf("%s", context.Root), test.parentFile)
+			if err := ioutil.WriteFile(absFilePath, []byte(test.parent), os.ModePerm); err != nil {
+				os.Remove(absFilePath)
+				t.Fatalf("Test %d: Expected no error creating file, got: '%s'", i, err.Error())
+			}
+		}
+		if test.childFile != "" {
+			absFilePath0 = filepath.Join(fmt.Sprintf("%s", context.Root), test.childFile)
+			if err := ioutil.WriteFile(absFilePath0, []byte(test.child), os.ModePerm); err != nil {
+				os.Remove(absFilePath0)
+				t.Fatalf("Test %d: Expected no error creating file, got: '%s'", i, err.Error())
+			}
+		}
+		if test.child2File != "" {
+			absFilePath1 = filepath.Join(fmt.Sprintf("%s", context.Root), test.child2File)
+			if err := ioutil.WriteFile(absFilePath1, []byte(test.child2), os.ModePerm); err != nil {
+				os.Remove(absFilePath0)
+				t.Fatalf("Test %d: Expected no error creating file, got: '%s'", i, err.Error())
+			}
+		}
+
+		buf = bufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer bufPool.Put(buf)
+		buf.WriteString(test.child)
+		err = context.executeTemplateInBuffer(test.childFile, buf)
+
+		if err != nil {
+			if !test.shouldErr {
+				t.Errorf("Test %d: Expected no error, got: '%s'", i, err)
+			}
+		} else if test.shouldErr {
+			t.Errorf("Test %d: Expected error but had none", i)
+		} else if buf.String() != test.expect {
+			//
+			t.Errorf("Test %d: Expected '%s' but got '%s'", i, test.expect, buf.String())
+
+		}
+
+		if absFilePath != "" {
+			if err := os.Remove(absFilePath); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("Test %d: Expected no error removing temporary test file, got: %v", i, err)
+			}
+		}
+		if absFilePath0 != "" {
+			if err := os.Remove(absFilePath0); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("Test %d: Expected no error removing temporary test file, got: %v", i, err)
+			}
+		}
+		if absFilePath1 != "" {
+			if err := os.Remove(absFilePath1); err != nil && !os.IsNotExist(err) {
 				t.Fatalf("Test %d: Expected no error removing temporary test file, got: %v", i, err)
 			}
 		}
@@ -516,8 +606,60 @@ title = "Welcome"
 
 }
 
+func TestHumanize(t *testing.T) {
+	tplContext := getContextOrFail(t)
+	for i, test := range []struct {
+		format    string
+		inputData string
+		expect    string
+		errorCase bool
+		verifyErr func(actual_string, substring string) bool
+	}{
+		{
+			format:    "size",
+			inputData: "2048000",
+			expect:    "2.0 MB",
+			errorCase: false,
+			verifyErr: strings.Contains,
+		},
+		{
+			format:    "time",
+			inputData: "Fri, 05 May 2022 15:04:05 +0200",
+			expect:    "ago",
+			errorCase: false,
+			verifyErr: strings.HasSuffix,
+		},
+		{
+			format:    "time:2006-Jan-02",
+			inputData: "2022-May-05",
+			expect:    "ago",
+			errorCase: false,
+			verifyErr: strings.HasSuffix,
+		},
+		{
+			format:    "time",
+			inputData: "Fri, 05 May 2022 15:04:05 GMT+0200",
+			expect:    "error:",
+			errorCase: true,
+			verifyErr: strings.HasPrefix,
+		},
+	} {
+		if actual, err := tplContext.funcHumanize(test.format, test.inputData); !test.verifyErr(actual, test.expect) {
+			if !test.errorCase {
+				t.Errorf("Test %d: Expected '%s' but got '%s'", i, test.expect, actual)
+				if err != nil {
+					t.Errorf("Test %d: error: %s", i, err.Error())
+				}
+			}
+		}
+	}
+}
+
 func getContextOrFail(t *testing.T) TemplateContext {
 	tplContext, err := initTestContext()
+	t.Cleanup(func() {
+		os.RemoveAll(string(tplContext.Root.(http.Dir)))
+	})
 	if err != nil {
 		t.Fatalf("failed to prepare test context: %v", err)
 	}
@@ -530,8 +672,12 @@ func initTestContext() (TemplateContext, error) {
 	if err != nil {
 		return TemplateContext{}, err
 	}
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "caddy")
+	if err != nil {
+		return TemplateContext{}, err
+	}
 	return TemplateContext{
-		Root:       http.Dir(os.TempDir()),
+		Root:       http.Dir(tmpDir),
 		Req:        request,
 		RespHeader: WrappedHeader{make(http.Header)},
 	}, nil
