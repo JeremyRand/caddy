@@ -1,1 +1,7 @@
-package-contains-documentation-outside-usr-share-doc usr/share/caddy/index.html
+package-contains-documentation-outside-usr-share-doc [usr/share/caddy/index.html]
+spelling-error-in-binary hexidecimal hexadecimal [usr/bin/caddy]
+spelling-error-in-binary octects octets [usr/bin/caddy]
+spelling-error-in-binary retriving retrieving [usr/bin/caddy]
+spelling-error-in-binary valif valid [usr/bin/caddy]
+spelling-error-in-binary wTH with [usr/bin/caddy]
+spelling-error-in-binary whE when [usr/bin/caddy]

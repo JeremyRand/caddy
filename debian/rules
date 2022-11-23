@@ -21,6 +21,10 @@ override_dh_auto_configure:
 	#import missing missing-sources
 	mkdir -p -v $(BUILDDIR)/src/github.com/caddyserver/caddy/v2/vendor/
 	cp -v -a debian/missing-sources/* $(BUILDDIR)/src/github.com/caddyserver/caddy/v2/vendor/
+	#import missing http files into build dir
+	mkdir -p -v $(BUILDDIR)/src/github.com/caddyserver/caddy/v2/modules/caddyhttp/fileserver/
+	cp -v -a modules/caddyhttp/fileserver/browse.html $(BUILDDIR)/src/github.com/caddyserver/caddy/v2/modules/caddyhttp/fileserver/
+	cp -v -a debian/missing-sources/caddy/fileserver/browse.html $(BUILDDIR)/src/github.com/caddyserver/caddy/v2/modules/caddyhttp/fileserver/
 	dh_auto_configure
 
 override_dh_auto_install:

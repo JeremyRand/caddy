@@ -44,6 +44,11 @@ Copyright: 2021 Peymaneh <peymaneh@posteo.net>
 License: Apache-2.0
 Comment: Debian packaging is licensed under the same terms as upstream
 
+Files: debian/missing-sources/caddy/*
+Copyright: 2015 Matthew Holt and The Caddy Authors
+License: Apache-2.0
+Comment: Bad formatting would have lintian throw very-long-line & source-is-missing
+
 Files: debian/missing-sources/google.golang.org/genproto/*
 Copyright: 2017 Google Inc.
 License: Apache-2.0
