@@ -10,10 +10,10 @@ Forwarded: Yes
  create mode 100644 modules/manpages/manpages.go
 
 diff --git a/cmd/caddy/main.go b/cmd/caddy/main.go
-index 2383546..f8c6ca6 100644
+index ee706d5..72ac4c0 100644
 --- a/cmd/caddy/main.go
 +++ b/cmd/caddy/main.go
-@@ -31,6 +31,7 @@ import (
+@@ -33,6 +33,7 @@ import (
  
  	// plug in Caddy modules here
  	_ "github.com/caddyserver/caddy/v2/modules/standard"

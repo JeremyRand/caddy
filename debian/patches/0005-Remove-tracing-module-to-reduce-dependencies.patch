@@ -1,0 +1,20 @@
+From: Peymaneh <peymaneh@posteo.net>
+Date: Thu, 24 Nov 2022 00:16:36 +0100
+Subject: Remove tracing module to reduce dependencies
+
+Forwarded: not-needed
+---
+ modules/caddyhttp/standard/imports.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/modules/caddyhttp/standard/imports.go b/modules/caddyhttp/standard/imports.go
+index 435569d..e45aca9 100644
+--- a/modules/caddyhttp/standard/imports.go
++++ b/modules/caddyhttp/standard/imports.go
+@@ -18,5 +18,5 @@ import (
+ 	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy/forwardauth"
+ 	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/rewrite"
+ 	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/templates"
+-	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/tracing"
++	//_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/tracing"
+ )

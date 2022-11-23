@@ -3,7 +3,7 @@
 #export DH_VERBOSE := 1
 export DH_GOPKG := github.com/caddyserver/caddy/v2
 export DH_GOLANG_INSTALL_EXTRA := caddytest
-export DH_GOLANG_EXCLUDES := integration
+export DH_GOLANG_EXCLUDES := integration tracing
 export CGO_ENABLED := 0
 export BUILDDIR := build
 

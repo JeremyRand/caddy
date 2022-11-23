@@ -2,3 +2,4 @@
 0002-Add-var-Version.patch
 0003-Add-module-for-generating-manpages.patch
 0004-Remove-dysfunct-commands.patch
+0005-Remove-tracing-module-to-reduce-dependencies.patch
