@@ -28,6 +28,10 @@ override_dh_auto_configure:
 	dh_auto_configure
 
 override_dh_auto_install:
+	#import install/remove scripts
+	cp -a dist/scripts/postinstall.sh debian/caddy.postinst
+	cp -a dist/scripts/postremove.sh debian/caddy.postrm
+	cp -a dist/scripts/preremove.sh debian/caddy.prerm
 	dh_auto_install -- --no-source
 
 override_dh_install:
