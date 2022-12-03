@@ -1,0 +1,3 @@
+#!/bin/sh
+# Check if systemd service returns an html page
+/usr/bin/curl --show-error --silent -i localhost:80

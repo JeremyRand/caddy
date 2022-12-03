@@ -1,0 +1,18 @@
+#!/bin/sh
+# Check if version string was included at compile time.
+version_cli=$(/usr/bin/caddy version)
+version_deb=$(head -n 1 debian/changelog | awk '{print $2}' | tr -d \(\) | cut -d- -f1)
+if [ -z $version_cli ]
+then
+    echo "Program version is zero."
+    return 1
+else
+    if [ "$version_cli" = "$version_deb" ]
+    then
+        echo "Success: Program version matches changelog entry"
+        return 0
+    else
+        echo "Program version differs from changelog entry!\n/usr/bin/caddy version: $version_cli\ndebian/changelog: $version_deb"
+        return 1
+    fi
+fi

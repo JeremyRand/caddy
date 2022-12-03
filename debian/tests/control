@@ -1,0 +1,9 @@
+Test-Command: caddy help
+Depends: @
+
+Tests: caddy-version
+Depends: @, coreutils
+
+Tests: caddy-serve
+Depends: @, curl
+Restrictions: isolation-container, needs-root
