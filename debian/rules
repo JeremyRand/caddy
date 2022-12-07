@@ -8,8 +8,7 @@ export CGO_ENABLED := 0
 export BUILDDIR := build
 
 include /usr/share/dpkg/pkg-info.mk
-VERSION = $(shell echo $(DEB_VERSION) | cut -d+ -f1)
-LDFLAGS := -ldflags '-X $(DH_GOPKG)/cmd.version=$(VERSION)'
+LDFLAGS := -ldflags '-X $(DH_GOPKG)/cmd.version=$(DEB_VERSION_UPSTREAM)'
 
 %:
 	dh $@ --builddirectory=$(BUILDDIR) --buildsystem=golang --with=golang
