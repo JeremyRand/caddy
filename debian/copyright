@@ -60,6 +60,11 @@ Copyright: 2010-2020 The Go Authors
 License: BSD-3-clause
 Comment: Copied from Debian package golang-github-golang-protobuf-1-5-dev
 
+Files: debian/missing-sources/github.com/google/cel-go/*
+Copyright: 2018-2021 Google LLC
+License: Apache-2.0
+Comment: Copied from Debian package golang-github-google-cel-go-dev (0.11.4+ds-2)
+
 License: Apache-2.0
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
