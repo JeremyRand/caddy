@@ -1,0 +1,29 @@
+From: Peymaneh <peymaneh@posteo.net>
+Date: Sat, 17 Dec 2022 16:22:55 +0100
+Subject: postinst.sh: Do not call chown recursively
+
+forwarded: not-needed
+---
+ dist/scripts/postinstall.sh | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/dist/scripts/postinstall.sh b/dist/scripts/postinstall.sh
+index 6c1ada0..ded3661 100644
+--- a/dist/scripts/postinstall.sh
++++ b/dist/scripts/postinstall.sh
+@@ -22,7 +22,7 @@ if [ "$1" = "configure" ]; then
+ 	# Add log directory with correct permissions
+ 	if [ ! -d /var/log/caddy ]; then
+ 		mkdir -p /var/log/caddy
+-		chown -R caddy:caddy /var/log/caddy
++		chown caddy:caddy /var/log/caddy
+ 	fi
+ fi
+ 
+@@ -52,4 +52,4 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
+ 			deb-systemd-invoke try-restart caddy-api.service >/dev/null || true
+ 		fi
+ 	fi
+-fi
+\ No newline at end of file
++fi

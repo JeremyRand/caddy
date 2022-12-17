@@ -3,3 +3,4 @@
 0003-Add-module-for-generating-manpages.patch
 0004-Remove-dysfunct-commands.patch
 0005-Remove-tracing-module-to-reduce-dependencies.patch
+0006-postinst.sh-Do-not-call-chown-recursively.patch
