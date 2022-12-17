@@ -1,3 +1,24 @@
+caddy (2.5.2-1) unstable; urgency=medium
+
+  * Upload to unstable
+    * Vendor relevant protobuf and genproto libraries
+    * Vendor cel-go
+    * Update d/readme.source
+  * New upstream version 2.5.2 (Closes: #1021587)
+  * d/control:
+    * Bump Standards-Version
+    * Update dependencies
+  * d/rules:
+    * Import post/pre-rm/inst scripts (Closes: #1014694)
+    * simplify fetching of build number
+  * d/patches:
+    * Temporarily disable tracing module
+    * do not run 'chown- R' in postinst
+  * d/tests/: add autopkgtest for caddy cli
+  * Multiple small changes to please lintian
+
+ -- Peymaneh <peymaneh@posteo.net>  Sat, 17 Dec 2022 15:43:08 +0100
+
 caddy (2.4.6-2) experimental; urgency=medium
 
   [ Peymaneh ]
