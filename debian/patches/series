@@ -4,3 +4,4 @@
 0004-Remove-dysfunct-commands.patch
 0005-Remove-tracing-module-to-reduce-dependencies.patch
 0006-postinst.sh-Do-not-call-chown-recursively.patch
+0007-Disable-test-TestETAgs.patch
