@@ -1,3 +1,11 @@
+caddy (2.5.2-3) unstable; urgency=medium
+
+  * d/control: Add media-types to runtime deps
+  * debian/: tidy up directory
+  * d/patches: postrm: remove directories on purge (Closes: #1022260)
+
+ -- Peymaneh <peymaneh@posteo.net>  Thu, 29 Dec 2022 15:05:36 +0100
+
 caddy (2.5.2-2) unstable; urgency=medium
 
   * d/patches: Disable TestETags test
