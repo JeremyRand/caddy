@@ -16,9 +16,12 @@ package fileserver
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
@@ -80,7 +83,7 @@ func (fsrv *FileServer) serveBrowse(root, dirPath string, w http.ResponseWriter,
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 
 	// calling path.Clean here prevents weird breadcrumbs when URL paths are sketchy like /%2e%2e%2f
-	listing, err := fsrv.loadDirectoryContents(dir, root, path.Clean(r.URL.Path), repl)
+	listing, err := fsrv.loadDirectoryContents(r.Context(), dir.(fs.ReadDirFile), root, path.Clean(r.URL.Path), repl)
 	switch {
 	case os.IsPermission(err):
 		return caddyhttp.Error(http.StatusForbidden, err)
@@ -93,6 +96,7 @@ func (fsrv *FileServer) serveBrowse(root, dirPath string, w http.ResponseWriter,
 	fsrv.browseApplyQueryParams(w, r, &listing)
 
 	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
 	defer bufPool.Put(buf)
 
 	acceptHeader := strings.ToLower(strings.Join(r.Header["Accept"], ","))
@@ -133,16 +137,16 @@ func (fsrv *FileServer) serveBrowse(root, dirPath string, w http.ResponseWriter,
 	return nil
 }
 
-func (fsrv *FileServer) loadDirectoryContents(dir *os.File, root, urlPath string, repl *caddy.Replacer) (browseTemplateContext, error) {
-	files, err := dir.Readdir(-1)
-	if err != nil {
+func (fsrv *FileServer) loadDirectoryContents(ctx context.Context, dir fs.ReadDirFile, root, urlPath string, repl *caddy.Replacer) (browseTemplateContext, error) {
+	files, err := dir.ReadDir(10000) // TODO: this limit should probably be configurable
+	if err != nil && err != io.EOF {
 		return browseTemplateContext{}, err
 	}
 
 	// user can presumably browse "up" to parent folder if path is longer than "/"
 	canGoUp := len(urlPath) > 1
 
-	return fsrv.directoryListing(files, canGoUp, root, urlPath, repl), nil
+	return fsrv.directoryListing(ctx, files, canGoUp, root, urlPath, repl), nil
 }
 
 // browseApplyQueryParams applies query parameters to the listing.
@@ -201,23 +205,23 @@ func (fsrv *FileServer) makeBrowseTemplate(tplCtx *templateContext) (*template.T
 	return tpl, nil
 }
 
-// isSymlink return true if f is a symbolic link
-func isSymlink(f os.FileInfo) bool {
-	return f.Mode()&os.ModeSymlink != 0
-}
-
 // isSymlinkTargetDir returns true if f's symbolic link target
 // is a directory.
-func isSymlinkTargetDir(f os.FileInfo, root, urlPath string) bool {
+func (fsrv *FileServer) isSymlinkTargetDir(f fs.FileInfo, root, urlPath string) bool {
 	if !isSymlink(f) {
 		return false
 	}
 	target := caddyhttp.SanitizedPathJoin(root, path.Join(urlPath, f.Name()))
-	targetInfo, err := os.Stat(target)
+	targetInfo, err := fs.Stat(fsrv.fileSystem, target)
 	if err != nil {
 		return false
 	}
 	return targetInfo.IsDir()
+}
+
+// isSymlink return true if f is a symbolic link.
+func isSymlink(f fs.FileInfo) bool {
+	return f.Mode()&os.ModeSymlink != 0
 }
 
 // templateContext powers the context used when evaluating the browse template.
@@ -230,7 +234,7 @@ type templateContext struct {
 
 // bufPool is used to increase the efficiency of file listings.
 var bufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return new(bytes.Buffer)
 	},
 }

@@ -44,7 +44,7 @@ import (
 type TemplateContext struct {
 	Root        http.FileSystem
 	Req         *http.Request
-	Args        []interface{} // defined by arguments to funcInclude
+	Args        []any // defined by arguments to funcInclude
 	RespHeader  WrappedHeader
 	CustomFuncs []template.FuncMap // functions added by plugins
 
@@ -99,7 +99,7 @@ func (c TemplateContext) OriginalReq() http.Request {
 // Note that included files are NOT escaped, so you should only include
 // trusted files. If it is not trusted, be sure to use escaping functions
 // in your template.
-func (c TemplateContext) funcInclude(filename string, args ...interface{}) (string, error) {
+func (c TemplateContext) funcInclude(filename string, args ...any) (string, error) {
 
 	bodyBuf := bufPool.Get().(*bytes.Buffer)
 	bodyBuf.Reset()
@@ -304,8 +304,8 @@ func (TemplateContext) funcStripHTML(s string) string {
 
 // funcMarkdown renders the markdown body as HTML. The resulting
 // HTML is NOT escaped so that it can be rendered as HTML.
-func (TemplateContext) funcMarkdown(input interface{}) (string, error) {
-	inputStr := toString(input)
+func (TemplateContext) funcMarkdown(input any) (string, error) {
+	inputStr := caddy.ToString(input)
 
 	md := goldmark.New(
 		goldmark.WithExtensions(
@@ -340,8 +340,8 @@ func (TemplateContext) funcMarkdown(input interface{}) (string, error) {
 // splitFrontMatter parses front matter out from the beginning of input,
 // and returns the separated key-value pairs and the body/content. input
 // must be a "stringy" value.
-func (TemplateContext) funcSplitFrontMatter(input interface{}) (parsedMarkdownDoc, error) {
-	meta, body, err := extractFrontMatter(toString(input))
+func (TemplateContext) funcSplitFrontMatter(input any) (parsedMarkdownDoc, error) {
+	meta, body, err := extractFrontMatter(caddy.ToString(input))
 	if err != nil {
 		return parsedMarkdownDoc{}, err
 	}
@@ -465,21 +465,8 @@ func (h WrappedHeader) Del(field string) string {
 	return ""
 }
 
-func toString(input interface{}) string {
-	switch v := input.(type) {
-	case string:
-		return v
-	case fmt.Stringer:
-		return v.String()
-	case error:
-		return v.Error()
-	default:
-		return fmt.Sprintf("%v", input)
-	}
-}
-
 var bufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return new(bytes.Buffer)
 	},
 }

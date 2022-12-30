@@ -178,7 +178,7 @@ func TestReplacerSet(t *testing.T) {
 
 	for _, tc := range []struct {
 		variable string
-		value    interface{}
+		value    any
 	}{
 		{
 			variable: "test1",
@@ -236,7 +236,7 @@ func TestReplacerReplaceKnown(t *testing.T) {
 	rep := Replacer{
 		providers: []ReplacerFunc{
 			// split our possible vars to two functions (to test if both functions are called)
-			func(key string) (val interface{}, ok bool) {
+			func(key string) (val any, ok bool) {
 				switch key {
 				case "test1":
 					return "val1", true
@@ -250,7 +250,7 @@ func TestReplacerReplaceKnown(t *testing.T) {
 					return "NOOO", false
 				}
 			},
-			func(key string) (val interface{}, ok bool) {
+			func(key string) (val any, ok bool) {
 				switch key {
 				case "1":
 					return "test-123", true
@@ -306,7 +306,7 @@ func TestReplacerReplaceKnown(t *testing.T) {
 
 func TestReplacerDelete(t *testing.T) {
 	rep := Replacer{
-		static: map[string]interface{}{
+		static: map[string]any{
 			"key1": "val1",
 			"key2": "val2",
 			"key3": "val3",
@@ -341,10 +341,10 @@ func TestReplacerMap(t *testing.T) {
 	rep := testReplacer()
 
 	for i, tc := range []ReplacerFunc{
-		func(key string) (val interface{}, ok bool) {
+		func(key string) (val any, ok bool) {
 			return "", false
 		},
-		func(key string) (val interface{}, ok bool) {
+		func(key string) (val any, ok bool) {
 			return "", false
 		},
 	} {
@@ -372,6 +372,7 @@ func TestReplacerNew(t *testing.T) {
 	} else {
 		// test if default global replacements are added  as the first provider
 		hostname, _ := os.Hostname()
+		wd, _ := os.Getwd()
 		os.Setenv("CADDY_REPLACER_TEST", "envtest")
 		defer os.Setenv("CADDY_REPLACER_TEST", "")
 
@@ -394,6 +395,10 @@ func TestReplacerNew(t *testing.T) {
 			{
 				variable: "system.arch",
 				value:    runtime.GOARCH,
+			},
+			{
+				variable: "system.wd",
+				value:    wd,
 			},
 			{
 				variable: "env.CADDY_REPLACER_TEST",
@@ -453,6 +458,6 @@ func BenchmarkReplacer(b *testing.B) {
 func testReplacer() Replacer {
 	return Replacer{
 		providers: make([]ReplacerFunc, 0),
-		static:    make(map[string]interface{}),
+		static:    make(map[string]any),
 	}
 }

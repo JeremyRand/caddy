@@ -20,11 +20,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/mholt/acmez"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -46,7 +49,7 @@ func (cp ConnectionPolicies) Provision(ctx caddy.Context) error {
 		if err != nil {
 			return fmt.Errorf("loading handshake matchers: %v", err)
 		}
-		for _, modIface := range mods.(map[string]interface{}) {
+		for _, modIface := range mods.(map[string]any) {
 			cp[i].matchers = append(cp[i].matchers, modIface.(ConnectionMatcher))
 		}
 
@@ -66,7 +69,7 @@ func (cp ConnectionPolicies) Provision(ctx caddy.Context) error {
 			if err != nil {
 				return fmt.Errorf("loading client cert verifiers: %v", err)
 			}
-			for _, validator := range clientCertValidations.([]interface{}) {
+			for _, validator := range clientCertValidations.([]any) {
 				cp[i].ClientAuthentication.verifiers = append(cp[i].ClientAuthentication.verifiers, validator.(ClientCertificateVerifier))
 			}
 		}
@@ -112,7 +115,7 @@ func (cp ConnectionPolicies) TLSConfig(_ caddy.Context) *tls.Config {
 						continue policyLoop
 					}
 				}
-				return pol.stdTLSConfig, nil
+				return pol.TLSConfig, nil
 			}
 
 			return nil, fmt.Errorf("no server TLS configuration available for ClientHello: %+v", hello)
@@ -156,8 +159,25 @@ type ConnectionPolicy struct {
 	// is no policy configured for the empty SNI value.
 	DefaultSNI string `json:"default_sni,omitempty"`
 
-	matchers     []ConnectionMatcher
-	stdTLSConfig *tls.Config
+	// Also known as "SSLKEYLOGFILE", TLS secrets will be written to
+	// this file in NSS key log format which can then be parsed by
+	// Wireshark and other tools. This is INSECURE as it allows other
+	// programs or tools to decrypt TLS connections. However, this
+	// capability can be useful for debugging and troubleshooting.
+	// **ENABLING THIS LOG COMPROMISES SECURITY!**
+	//
+	// This feature is EXPERIMENTAL and subject to change or removal.
+	InsecureSecretsLog string `json:"insecure_secrets_log,omitempty"`
+
+	// TLSConfig is the fully-formed, standard lib TLS config
+	// used to serve TLS connections. Provision all
+	// ConnectionPolicies to populate this. It is exported only
+	// so it can be minimally adjusted after provisioning
+	// if necessary (like to adjust NextProtos to disable HTTP/2),
+	// and may be unexported in the future.
+	TLSConfig *tls.Config `json:"-"`
+
+	matchers []ConnectionMatcher
 }
 
 func (p *ConnectionPolicy) buildStandardTLSConfig(ctx caddy.Context) error {
@@ -172,8 +192,7 @@ func (p *ConnectionPolicy) buildStandardTLSConfig(ctx caddy.Context) error {
 	// so the user-provided config can fill them in; then we will
 	// fill in a default config at the end if they are still unset
 	cfg := &tls.Config{
-		NextProtos:               p.ALPN,
-		PreferServerCipherSuites: true,
+		NextProtos: p.ALPN,
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			// TODO: I don't love how this works: we pre-build certmagic configs
 			// so that handshakes are faster. Unfortunately, certmagic configs are
@@ -274,9 +293,33 @@ func (p *ConnectionPolicy) buildStandardTLSConfig(ctx caddy.Context) error {
 		}
 	}
 
+	if p.InsecureSecretsLog != "" {
+		filename, err := caddy.NewReplacer().ReplaceOrErr(p.InsecureSecretsLog, true, true)
+		if err != nil {
+			return err
+		}
+		filename, err = filepath.Abs(filename)
+		if err != nil {
+			return err
+		}
+		logFile, _, err := secretsLogPool.LoadOrNew(filename, func() (caddy.Destructor, error) {
+			w, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+			return destructableWriter{w}, err
+		})
+		if err != nil {
+			return err
+		}
+		ctx.OnCancel(func() { _, _ = secretsLogPool.Delete(filename) })
+
+		cfg.KeyLogWriter = logFile.(io.Writer)
+
+		tlsApp.logger.Warn("TLS SECURITY COMPROMISED: secrets logging is enabled!",
+			zap.String("log_filename", filename))
+	}
+
 	setDefaultTLSParams(cfg)
 
-	p.stdTLSConfig = cfg
+	p.TLSConfig = cfg
 
 	return nil
 }
@@ -291,7 +334,8 @@ func (p ConnectionPolicy) SettingsEmpty() bool {
 		p.ProtocolMin == "" &&
 		p.ProtocolMax == "" &&
 		p.ClientAuthentication == nil &&
-		p.DefaultSNI == ""
+		p.DefaultSNI == "" &&
+		p.InsecureSecretsLog == ""
 }
 
 // ClientAuthentication configures TLS client auth.
@@ -475,8 +519,6 @@ func setDefaultTLSParams(cfg *tls.Config) {
 	if cfg.MaxVersion == 0 {
 		cfg.MaxVersion = tls.VersionTLS13
 	}
-
-	cfg.PreferServerCipherSuites = true
 }
 
 // LeafCertClientAuth verifies the client's leaf certificate.
@@ -538,3 +580,9 @@ type ClientCertificateVerifier interface {
 }
 
 var defaultALPN = []string{"h2", "http/1.1"}
+
+type destructableWriter struct{ *os.File }
+
+func (d destructableWriter) Destruct() error { return d.Close() }
+
+var secretsLogPool = caddy.NewUsagePool()
