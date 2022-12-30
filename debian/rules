@@ -37,3 +37,6 @@ override_dh_auto_install:
 	debian/caddy/usr/bin/caddy completion bash > debian/generated/completions/caddy
 	debian/caddy/usr/bin/caddy completion zsh > debian/generated/completions/_caddy
 	debian/caddy/usr/bin/caddy completion fish > debian/generated/completions/caddy.fish
+	#generate manpage
+	mkdir -p debian/generated/manpages
+	debian/caddy/usr/bin/caddy manpage --directory debian/generated/manpages
