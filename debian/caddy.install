@@ -1,4 +1,7 @@
-dist/config/Caddyfile                    etc/caddy/
-dist/init/caddy.service                  usr/lib/systemd/system
-dist/init/caddy-api.service              usr/lib/systemd/system
-debian/missing-sources/caddy/welcome/index.html         usr/share/caddy/
+dist/config/Caddyfile                           etc/caddy/
+dist/init/caddy.service                         usr/lib/systemd/system
+dist/init/caddy-api.service                     usr/lib/systemd/system
+debian/missing-sources/caddy/welcome/index.html usr/share/caddy/
+debian/generated/completions/caddy              usr/share/bash-completion/completions/
+debian/generated/completions/_caddy             usr/share/zsh/vendor-completions/
+debian/generated/completions/caddy.fish         usr/share/fish/vendor_completions.d/
