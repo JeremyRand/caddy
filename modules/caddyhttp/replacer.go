@@ -31,6 +31,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/textproto"
 	"net/url"
 	"path"
@@ -57,7 +58,7 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 	SetVar(req.Context(), "start_time", time.Now())
 	SetVar(req.Context(), "uuid", new(requestID))
 
-	httpVars := func(key string) (interface{}, bool) {
+	httpVars := func(key string) (any, bool) {
 		if req != nil {
 			// query string parameters
 			if strings.HasPrefix(key, reqURIQueryReplPrefix) {
@@ -143,6 +144,10 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 			case "http.request.uri.path.dir":
 				dir, _ := path.Split(req.URL.Path)
 				return dir, true
+			case "http.request.uri.path.file.base":
+				return strings.TrimSuffix(path.Base(req.URL.Path), path.Ext(req.URL.Path)), true
+			case "http.request.uri.path.file.ext":
+				return path.Ext(req.URL.Path), true
 			case "http.request.uri.query":
 				return req.URL.RawQuery, true
 			case "http.request.duration":
@@ -169,7 +174,7 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 				req.Body = io.NopCloser(buf)  // replace real body with buffered data
 				return buf.String(), true
 
-				// original request, before any internal changes
+			// original request, before any internal changes
 			case "http.request.orig_method":
 				or, _ := req.Context().Value(OriginalRequestCtxKey).(http.Request)
 				return or.Method, true
@@ -190,6 +195,37 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 			case "http.request.orig_uri.query":
 				or, _ := req.Context().Value(OriginalRequestCtxKey).(http.Request)
 				return or.URL.RawQuery, true
+			}
+
+			// remote IP range/prefix (e.g. keep top 24 bits of 1.2.3.4  => "1.2.3.0/24")
+			// syntax: "/V4,V6" where V4 = IPv4 bits, and V6 = IPv6 bits; if no comma, then same bit length used for both
+			// (EXPERIMENTAL)
+			if strings.HasPrefix(key, "http.request.remote.host/") {
+				host, _, err := net.SplitHostPort(req.RemoteAddr)
+				if err != nil {
+					host = req.RemoteAddr // assume no port, I guess?
+				}
+				addr, err := netip.ParseAddr(host)
+				if err != nil {
+					return host, true // not an IP address
+				}
+				// extract the bits from the end of the placeholder (start after "/") then split on ","
+				bitsBoth := key[strings.Index(key, "/")+1:]
+				ipv4BitsStr, ipv6BitsStr, cutOK := strings.Cut(bitsBoth, ",")
+				bitsStr := ipv4BitsStr
+				if addr.Is6() && cutOK {
+					bitsStr = ipv6BitsStr
+				}
+				// convert to integer then compute prefix
+				bits, err := strconv.Atoi(bitsStr)
+				if err != nil {
+					return "", true
+				}
+				prefix, err := addr.Prefix(bits)
+				if err != nil {
+					return "", true
+				}
+				return prefix.String(), true
 			}
 
 			// hostname labels
@@ -233,7 +269,7 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 			// middleware variables
 			if strings.HasPrefix(key, varsReplPrefix) {
 				varName := key[len(varsReplPrefix):]
-				tbl := req.Context().Value(VarsCtxKey).(map[string]interface{})
+				tbl := req.Context().Value(VarsCtxKey).(map[string]any)
 				raw := tbl[varName]
 				// variables can be dynamic, so always return true
 				// even when it may not be set; treat as empty then
@@ -252,13 +288,29 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 			}
 		}
 
+		switch {
+		case key == "http.shutting_down":
+			server := req.Context().Value(ServerCtxKey).(*Server)
+			server.shutdownAtMu.RLock()
+			defer server.shutdownAtMu.RUnlock()
+			return !server.shutdownAt.IsZero(), true
+		case key == "http.time_until_shutdown":
+			server := req.Context().Value(ServerCtxKey).(*Server)
+			server.shutdownAtMu.RLock()
+			defer server.shutdownAtMu.RUnlock()
+			if server.shutdownAt.IsZero() {
+				return nil, true
+			}
+			return time.Until(server.shutdownAt), true
+		}
+
 		return nil, false
 	}
 
 	repl.Map(httpVars)
 }
 
-func getReqTLSReplacement(req *http.Request, key string) (interface{}, bool) {
+func getReqTLSReplacement(req *http.Request, key string) (any, bool) {
 	if req == nil || req.TLS == nil {
 		return nil, false
 	}
@@ -279,7 +331,7 @@ func getReqTLSReplacement(req *http.Request, key string) (interface{}, bool) {
 		if strings.HasPrefix(field, "client.san.") {
 			field = field[len("client.san."):]
 			var fieldName string
-			var fieldValue interface{}
+			var fieldValue any
 			switch {
 			case strings.HasPrefix(field, "dns_names"):
 				fieldName = "dns_names"
@@ -383,7 +435,7 @@ func getReqTLSReplacement(req *http.Request, key string) (interface{}, bool) {
 }
 
 // marshalPublicKey returns the byte encoding of pubKey.
-func marshalPublicKey(pubKey interface{}) ([]byte, error) {
+func marshalPublicKey(pubKey any) ([]byte, error) {
 	switch key := pubKey.(type) {
 	case *rsa.PublicKey:
 		return asn1.Marshal(key)

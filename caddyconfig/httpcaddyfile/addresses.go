@@ -17,6 +17,7 @@ package httpcaddyfile
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
 	"sort"
 	"strconv"
@@ -35,12 +36,12 @@ import (
 // server block that share the same address stay grouped together so the config
 // isn't repeated unnecessarily. For example, this Caddyfile:
 //
-// 	example.com {
-// 		bind 127.0.0.1
-// 	}
-// 	www.example.com, example.net/path, localhost:9999 {
-// 		bind 127.0.0.1 1.2.3.4
-// 	}
+//	example.com {
+//		bind 127.0.0.1
+//	}
+//	www.example.com, example.net/path, localhost:9999 {
+//		bind 127.0.0.1 1.2.3.4
+//	}
 //
 // has two server blocks to start with. But expressed in this Caddyfile are
 // actually 4 listener addresses: 127.0.0.1:443, 1.2.3.4:443, 127.0.0.1:9999,
@@ -76,7 +77,7 @@ import (
 // multiple addresses to the same lists of server blocks (a many:many mapping).
 // (Doing this is essentially a map-reduce technique.)
 func (st *ServerType) mapAddressToServerBlocks(originalServerBlocks []serverBlock,
-	options map[string]interface{}) (map[string][]serverBlock, error) {
+	options map[string]any) (map[string][]serverBlock, error) {
 	sbmap := make(map[string][]serverBlock)
 
 	for i, sblock := range originalServerBlocks {
@@ -183,8 +184,10 @@ func (st *ServerType) consolidateAddrMappings(addrToServerBlocks map[string][]se
 	return sbaddrs
 }
 
+// listenerAddrsForServerBlockKey essentially converts the Caddyfile
+// site addresses to Caddy listener addresses for each server block.
 func (st *ServerType) listenerAddrsForServerBlockKey(sblock serverBlock, key string,
-	options map[string]interface{}) ([]string, error) {
+	options map[string]any) ([]string, error) {
 	addr, err := ParseAddress(key)
 	if err != nil {
 		return nil, fmt.Errorf("parsing key: %v", err)
@@ -216,7 +219,7 @@ func (st *ServerType) listenerAddrsForServerBlockKey(sblock serverBlock, key str
 		return nil, fmt.Errorf("[%s] scheme and port violate convention", key)
 	}
 
-	// the bind directive specifies hosts, but is optional
+	// the bind directive specifies hosts (and potentially network), but is optional
 	lnHosts := make([]string, 0, len(sblock.pile["bind"]))
 	for _, cfgVal := range sblock.pile["bind"] {
 		lnHosts = append(lnHosts, cfgVal.Value.([]string)...)
@@ -231,13 +234,27 @@ func (st *ServerType) listenerAddrsForServerBlockKey(sblock serverBlock, key str
 
 	// use a map to prevent duplication
 	listeners := make(map[string]struct{})
-	for _, host := range lnHosts {
-		addr, err := caddy.ParseNetworkAddress(host)
-		if err == nil && addr.IsUnixNetwork() {
-			listeners[host] = struct{}{}
-		} else {
-			listeners[host+":"+lnPort] = struct{}{}
+	for _, lnHost := range lnHosts {
+		// normally we would simply append the port,
+		// but if lnHost is IPv6, we need to ensure it
+		// is enclosed in [ ]; net.JoinHostPort does
+		// this for us, but lnHost might also have a
+		// network type in front (e.g. "tcp/") leading
+		// to "[tcp/::1]" which causes parsing failures
+		// later; what we need is "tcp/[::1]", so we have
+		// to split the network and host, then re-combine
+		network, host, ok := strings.Cut(lnHost, "/")
+		if !ok {
+			host = network
+			network = ""
 		}
+		host = strings.Trim(host, "[]") // IPv6
+		networkAddr := caddy.JoinNetworkAddress(network, host, lnPort)
+		addr, err := caddy.ParseNetworkAddress(networkAddr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing network address: %v", err)
+		}
+		listeners[addr.String()] = struct{}{}
 	}
 
 	// now turn map into list
@@ -350,9 +367,9 @@ func (a Address) Normalize() Address {
 
 	// ensure host is normalized if it's an IP address
 	host := strings.TrimSpace(a.Host)
-	if ip := net.ParseIP(host); ip != nil {
-		if ipv6 := ip.To16(); ipv6 != nil && ipv6.DefaultMask() == nil {
-			host = ipv6.String()
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if ip.Is6() && !ip.Is4() && !ip.Is4In6() {
+			host = ip.String()
 		}
 	}
 

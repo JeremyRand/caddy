@@ -43,7 +43,7 @@ type Defaults struct {
 
 // Default testing values
 var Default = Defaults{
-	AdminPort:          2019,
+	AdminPort:          2999, // different from what a real server also running on a developer's machine might be
 	Certifcates:        []string{"/caddy.localhost.crt", "/caddy.localhost.key"},
 	TestRequestTimeout: 5 * time.Second,
 	LoadRequestTimeout: 5 * time.Second,
@@ -100,7 +100,7 @@ func (tc *Tester) InitServer(rawConfig string, configType string) {
 		tc.t.Fail()
 	}
 	if err := tc.ensureConfigRunning(rawConfig, configType); err != nil {
-		tc.t.Logf("failed ensurng config is running: %s", err)
+		tc.t.Logf("failed ensuring config is running: %s", err)
 		tc.t.Fail()
 	}
 }
@@ -186,7 +186,7 @@ func (tc *Tester) ensureConfigRunning(rawConfig string, configType string) error
 		expectedBytes, _, _ = adapter.Adapt([]byte(rawConfig), nil)
 	}
 
-	var expected interface{}
+	var expected any
 	err := json.Unmarshal(expectedBytes, &expected)
 	if err != nil {
 		return err
@@ -196,7 +196,7 @@ func (tc *Tester) ensureConfigRunning(rawConfig string, configType string) error
 		Timeout: Default.LoadRequestTimeout,
 	}
 
-	fetchConfig := func(client *http.Client) interface{} {
+	fetchConfig := func(client *http.Client) any {
 		resp, err := client.Get(fmt.Sprintf("http://localhost:%d/config/", Default.AdminPort))
 		if err != nil {
 			return nil
@@ -206,7 +206,7 @@ func (tc *Tester) ensureConfigRunning(rawConfig string, configType string) error
 		if err != nil {
 			return nil
 		}
-		var actual interface{}
+		var actual any
 		err = json.Unmarshal(actualBytes, &actual)
 		if err != nil {
 			return nil
@@ -214,7 +214,7 @@ func (tc *Tester) ensureConfigRunning(rawConfig string, configType string) error
 		return actual
 	}
 
-	for retries := 4; retries > 0; retries-- {
+	for retries := 10; retries > 0; retries-- {
 		if reflect.DeepEqual(expected, fetchConfig(client)) {
 			return nil
 		}
@@ -237,13 +237,13 @@ func validateTestPrerequisites() error {
 
 	if isCaddyAdminRunning() != nil {
 		// start inprocess caddy server
-		os.Args = []string{"caddy", "run"}
+		os.Args = []string{"caddy", "run", "--config", "./test.init.config", "--adapter", "caddyfile"}
 		go func() {
 			caddycmd.Main()
 		}()
 
 		// wait for caddy to start serving the initial config
-		for retries := 4; retries > 0 && isCaddyAdminRunning() != nil; retries-- {
+		for retries := 10; retries > 0 && isCaddyAdminRunning() != nil; retries-- {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -371,7 +371,7 @@ func CompareAdapt(t *testing.T, filename, rawConfig string, adapterName string, 
 		return false
 	}
 
-	options := make(map[string]interface{})
+	options := make(map[string]any)
 
 	result, warnings, err := cfgAdapter.Adapt([]byte(rawConfig), options)
 	if err != nil {
