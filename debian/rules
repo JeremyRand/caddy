@@ -32,8 +32,3 @@ override_dh_auto_install:
 	cp -a dist/scripts/postremove.sh debian/caddy.postrm
 	cp -a dist/scripts/preremove.sh debian/caddy.prerm
 	dh_auto_install -- --no-source
-
-override_dh_install:
-	dh_install
-	mv debian/caddy/usr/share/bash-completion/completions/bash-completion \
-	    debian/caddy/usr/share/bash-completion/completions/caddy
