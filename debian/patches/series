@@ -1,8 +1,5 @@
-0001-Remove-shebang-from-bash-completion.patch
-0002-Add-var-Version.patch
-0003-Add-module-for-generating-manpages.patch
-0004-Remove-dysfunct-commands.patch
 0005-Remove-tracing-module-to-reduce-dependencies.patch
 0006-postinst.sh-Do-not-call-chown-recursively.patch
-0007-Disable-test-TestETAgs.patch
 0008-remove-dirs-on-purge.patch
+0004-Add-short-description-for-caddy-command.patch
+0005-Remove-obsolote-subcommands.patch
