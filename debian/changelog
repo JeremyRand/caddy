@@ -1,3 +1,17 @@
+caddy (2.6.2-1) unstable; urgency=medium
+
+  * New upstream version 2.6.2
+  * Adjust patches to upstream changes
+  * d/rules: Adjust ldflags for including version string
+  * d/missing-sources: Update vendored cel-go to 0.12.5
+  * d/caddy.install: update
+  * Generate shell completion scripts at build time
+  * Generate manpages at build time
+  * Override false positive lintian warning
+  * d/TODO: Update
+
+ -- Peymaneh <peymaneh@posteo.net>  Mon, 02 Jan 2023 22:07:56 +0100
+
 caddy (2.5.2-3) unstable; urgency=medium
 
   * d/control: Add media-types to runtime deps
