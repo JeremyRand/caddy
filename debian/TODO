@@ -1,17 +1,4 @@
 TODO
 ----
 
-* Get man pages for cli usage into upstream
-  -> Related bugreport[1]
-
-* Manuals for Caddyfile(5) and caddy-api(7) would be good to have, but
-  unrealistic to write and maintain manually
-  -> Check out how to convert docs for website[2] in automated fashion - maybe
-  with pandoc (https://pandoc.org) - or render to static html to be shipped
-
 * Write apparmor profile
-
-* Check if build is reproducible
-
-[1] https://github.com/caddyserver/dist/issues/29
-[2] https://github.com/caddyserver/website
