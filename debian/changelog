@@ -1,3 +1,9 @@
+caddy (2.6.2-2) unstable; urgency=medium
+
+  * d/rules: Hardening
+
+ -- Peymaneh <peymaneh@posteo.net>  Fri, 13 Jan 2023 22:34:49 +0100
+
 caddy (2.6.2-1) unstable; urgency=medium
 
   * New upstream version 2.6.2
