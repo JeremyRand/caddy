@@ -1,8 +1,10 @@
 caddy (2.6.2-4) unstable; urgency=medium
 
   * d/rules: enable CGO, use common hardening flags
+  * d/patches: reproducible manpage time stamps
+  * d/control: Add missing dependency
 
- -- Peymaneh <peymaneh@posteo.net>  Sat, 14 Jan 2023 17:10:09 +0100
+ -- Peymaneh <peymaneh@posteo.net>  Sun, 15 Jan 2023 22:06:16 +0100
 
 caddy (2.6.2-3) unstable; urgency=medium
 
