@@ -1,0 +1,51 @@
+From: Peymaneh <peymaneh@posteo.net>
+Date: Sat, 14 Jan 2023 17:54:50 +0100
+Subject: Add variable for reproducible manpage time stamps
+
+---
+ cmd/commands.go | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/cmd/commands.go b/cmd/commands.go
+index c895ec4..3c58a15 100644
+--- a/cmd/commands.go
++++ b/cmd/commands.go
+@@ -20,12 +20,21 @@ import (
+ 	"os"
+ 	"regexp"
+ 	"strings"
++	"time"
+ 
+ 	"github.com/caddyserver/caddy/v2"
+ 	"github.com/spf13/cobra"
+ 	"github.com/spf13/cobra/doc"
+ )
+ 
++// CustomDate will be used by the cobra manpage generator to generate a
++// reproducible timestamp. If the "Date" header passed to cobra is empty, it
++// will derive the time at build time, which is not reproducible.
++// can be passed to  during `go build` with `-ldflags`:
++//
++//	-ldflags '-X github.com/caddyserver/caddy/v2/cmd.CustomDate=DD.MM.YYYY'
++var CustomDate string
++
+ // Command represents a subcommand. Name, Func,
+ // and Short are required.
+ type Command struct {
+@@ -339,6 +348,16 @@ is always printed to stdout.`,
+ 			if err := os.MkdirAll(dir, 0755); err != nil {
+ 				return caddy.ExitCodeFailedQuit, err
+ 			}
++			if CustomDate != "" {
++				date, _ := time.Parse(time.RFC3339, CustomDate)
++				if err := doc.GenManTree(rootCmd, &doc.GenManHeader{
++					Title:   "Caddy",
++					Section: "8", // https://en.wikipedia.org/wiki/Man_page#Manual_sections
++					Date:    &date,
++				}, dir); err != nil {
++					return caddy.ExitCodeFailedQuit, err
++				}
++			}
+ 			if err := doc.GenManTree(rootCmd, &doc.GenManHeader{
+ 				Title:   "Caddy",
+ 				Section: "8", // https://en.wikipedia.org/wiki/Man_page#Manual_sections

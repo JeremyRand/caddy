@@ -8,7 +8,7 @@ export DH_GOLANG_EXCLUDES := integration tracing
 export BUILDDIR := build
 
 include /usr/share/dpkg/pkg-info.mk
-LDFLAGS := -ldflags '-X $(DH_GOPKG).CustomVersion=$(DEB_VERSION_UPSTREAM)'
+LDFLAGS := -ldflags '-X $(DH_GOPKG).CustomVersion=$(DEB_VERSION_UPSTREAM) -X $(DH_GOPKG)/cmd.CustomDate="$(SOURCE_DATE_EPOCH)"'
 
 %:
 	dh $@ --builddirectory=$(BUILDDIR) --buildsystem=golang --with=golang
