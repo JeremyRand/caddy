@@ -1,3 +1,9 @@
+caddy (2.6.2-5) unstable; urgency=high
+
+  * d/caddy.install: Fix location for systemd files (Closes: #1034221)
+
+ -- Peymaneh <peymaneh@posteo.net>  Mon, 17 Apr 2023 15:11:12 +0200
+
 caddy (2.6.2-4) unstable; urgency=medium
 
   * d/rules: enable CGO, use common hardening flags
