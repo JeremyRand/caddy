@@ -1,0 +1,89 @@
+From: Shengjing Zhu <zhsj@debian.org>
+Date: Wed, 23 Aug 2023 19:23:49 +0800
+Subject: quic-go 0.37.4
+
+---
+ listeners.go                | 10 +++++-----
+ modules/caddyhttp/app.go    |  4 ++--
+ modules/caddyhttp/server.go |  4 ++--
+ 3 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/listeners.go b/listeners.go
+index ea03ca4..1c96e91 100644
+--- a/listeners.go
++++ b/listeners.go
+@@ -30,8 +30,8 @@ import (
+ 	"syscall"
+ 	"time"
+ 
+-	"github.com/lucas-clemente/quic-go"
+-	"github.com/lucas-clemente/quic-go/http3"
++	"github.com/quic-go/quic-go"
++	"github.com/quic-go/quic-go/http3"
+ 	"go.uber.org/zap"
+ )
+ 
+@@ -435,7 +435,7 @@ func ListenPacket(network, addr string) (net.PacketConn, error) {
+ // NOTE: This API is EXPERIMENTAL and may be changed or removed.
+ //
+ // TODO: See if we can find a more elegant solution closer to the new NetworkAddress.Listen API.
+-func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (quic.EarlyListener, error) {
++func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (http3.QUICEarlyListener, error) {
+ 	lnKey := listenerKey("quic+"+ln.LocalAddr().Network(), ln.LocalAddr().String())
+ 
+ 	sharedEarlyListener, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
+@@ -462,7 +462,7 @@ func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (
+ 	// of closes) because closing the quic.EarlyListener doesn't actually close
+ 	// the underlying PacketConn, but we need to for unix sockets since we dup
+ 	// the file descriptor and thus need to close the original; track issue:
+-	// https://github.com/lucas-clemente/quic-go/issues/3560#issuecomment-1258959608
++	// https://github.com/quic-go/quic-go/issues/3560#issuecomment-1258959608
+ 	var unix *unixConn
+ 	if uc, ok := ln.(*unixConn); ok {
+ 		unix = uc
+@@ -485,7 +485,7 @@ func ListenerUsage(network, addr string) int {
+ 
+ // sharedQuicListener is like sharedListener, but for quic.EarlyListeners.
+ type sharedQuicListener struct {
+-	quic.EarlyListener
++	*quic.EarlyListener
+ 	key string
+ }
+ 
+diff --git a/modules/caddyhttp/app.go b/modules/caddyhttp/app.go
+index 0943b32..9b0c414 100644
+--- a/modules/caddyhttp/app.go
++++ b/modules/caddyhttp/app.go
+@@ -554,7 +554,7 @@ func (app *App) Stop() error {
+ 
+ 		// TODO: we have to manually close our listeners because quic-go won't
+ 		// close listeners it didn't create along with the server itself...
+-		// see https://github.com/lucas-clemente/quic-go/issues/3560
++		// see https://github.com/quic-go/quic-go/issues/3560
+ 		for _, el := range server.h3listeners {
+ 			if err := el.Close(); err != nil {
+ 				app.logger.Error("HTTP/3 listener close",
+@@ -563,7 +563,7 @@ func (app *App) Stop() error {
+ 			}
+ 		}
+ 
+-		// TODO: CloseGracefully, once implemented upstream (see https://github.com/lucas-clemente/quic-go/issues/2103)
++		// TODO: CloseGracefully, once implemented upstream (see https://github.com/quic-go/quic-go/issues/2103)
+ 		if err := server.h3server.Close(); err != nil {
+ 			app.logger.Error("HTTP/3 server shutdown",
+ 				zap.Error(err),
+diff --git a/modules/caddyhttp/server.go b/modules/caddyhttp/server.go
+index 7a244d2..bd38f48 100644
+--- a/modules/caddyhttp/server.go
++++ b/modules/caddyhttp/server.go
+@@ -32,8 +32,8 @@ import (
+ 	"github.com/caddyserver/caddy/v2/modules/caddyevents"
+ 	"github.com/caddyserver/caddy/v2/modules/caddytls"
+ 	"github.com/caddyserver/certmagic"
+-	"github.com/lucas-clemente/quic-go"
+-	"github.com/lucas-clemente/quic-go/http3"
++	"github.com/quic-go/quic-go"
++	"github.com/quic-go/quic-go/http3"
+ 	"go.uber.org/zap"
+ 	"go.uber.org/zap/zapcore"
+ )
