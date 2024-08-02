@@ -3,11 +3,5 @@ This package vendors multiple files and libraries in debian/missing-sources
 1. missing-sources/caddy/*
    These are files from the orig.tar that contain absurdly long lines and will be ignored by lintian when searching for the original source file. they are reformattet to please lintian.
 
-2. missing-sources/github.com/golang/protobuf -> github.com/golang/protobuf v1.5.x
-   This is necessary because Caddy requires golang-github-golang-protobuf-1-5-dev, while some of its dependencies require golang-github-golang-protobuf-1-3-dev, which is incompatible to the former
-
-3. missing-sources/google.golang.org/genproto Multiple libraries from google.golang.org/genproto libraries at
-   https://github.com/googleapis/go-genproto/tree/715cce707fb0474ad6718c6a213fc78dc168aff9
-
-3. missing-sources/github.com/google/cel-go
+2. missing-sources/github.com/google/cel-go
    golang-github-google-cel-go is in the archives, but also requires golang-github-golang-protobuf-1-5-dev als build-dep and vendors it as github.com/google/cel-go/vendor/$importpath. Because caddy vendors them as github.com/caddyserver/caddy/v2/vendor/$importpath, the Go compiler will refuse to use use them interchangibly.
