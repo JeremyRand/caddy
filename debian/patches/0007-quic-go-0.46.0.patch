@@ -1,18 +1,18 @@
 From: Shengjing Zhu <zhsj@debian.org>
 Date: Wed, 23 Aug 2023 19:23:49 +0800
-Subject: quic-go 0.37.4
+Subject: quic-go 0.46.0
 
 ---
- listeners.go                | 10 +++++-----
+ listeners.go                | 28 ++++++++++++++--------------
  modules/caddyhttp/app.go    |  4 ++--
- modules/caddyhttp/server.go |  4 ++--
- 3 files changed, 9 insertions(+), 9 deletions(-)
+ modules/caddyhttp/server.go |  6 +++---
+ 3 files changed, 19 insertions(+), 19 deletions(-)
 
 diff --git a/listeners.go b/listeners.go
-index ea03ca4..1c96e91 100644
+index ea03ca4..d5906ef 100644
 --- a/listeners.go
 +++ b/listeners.go
-@@ -30,8 +30,8 @@ import (
+@@ -30,9 +30,10 @@ import (
  	"syscall"
  	"time"
  
@@ -21,9 +21,11 @@ index ea03ca4..1c96e91 100644
 +	"github.com/quic-go/quic-go"
 +	"github.com/quic-go/quic-go/http3"
  	"go.uber.org/zap"
++	"golang.org/x/time/rate"
  )
  
-@@ -435,7 +435,7 @@ func ListenPacket(network, addr string) (net.PacketConn, error) {
+ // NetworkAddress represents one or more network addresses.
+@@ -435,19 +436,18 @@ func ListenPacket(network, addr string) (net.PacketConn, error) {
  // NOTE: This API is EXPERIMENTAL and may be changed or removed.
  //
  // TODO: See if we can find a more elegant solution closer to the new NetworkAddress.Listen API.
@@ -32,6 +34,26 @@ index ea03ca4..1c96e91 100644
  	lnKey := listenerKey("quic+"+ln.LocalAddr().Network(), ln.LocalAddr().String())
  
  	sharedEarlyListener, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
+-		earlyLn, err := quic.ListenEarly(ln, http3.ConfigureTLSConfig(tlsConf), &quic.Config{
+-			RequireAddressValidation: func(clientAddr net.Addr) bool {
+-				var highLoad bool
+-				if activeRequests != nil {
+-					highLoad = atomic.LoadInt64(activeRequests) > 1000 // TODO: make tunable?
+-				}
+-				return highLoad
+-			},
+-		})
++		// Require clients to verify their source address when we're handling more than 1000 handshakes per second.
++		// TODO: make tunable?
++		limiter := rate.NewLimiter(1000, 1000)
++		tr := &quic.Transport{
++			Conn:                ln,
++			VerifySourceAddress: func(addr net.Addr) bool { return !limiter.Allow() },
++		}
++		earlyLn, err := tr.ListenEarly(http3.ConfigureTLSConfig(tlsConf), &quic.Config{Allow0RTT: true})
+ 		if err != nil {
+ 			return nil, err
+ 		}
 @@ -462,7 +462,7 @@ func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (
  	// of closes) because closing the quic.EarlyListener doesn't actually close
  	// the underlying PacketConn, but we need to for unix sockets since we dup
@@ -73,7 +95,7 @@ index 0943b32..9b0c414 100644
  			app.logger.Error("HTTP/3 server shutdown",
  				zap.Error(err),
 diff --git a/modules/caddyhttp/server.go b/modules/caddyhttp/server.go
-index 7a244d2..bd38f48 100644
+index 7a244d2..11dc16d 100644
 --- a/modules/caddyhttp/server.go
 +++ b/modules/caddyhttp/server.go
 @@ -32,8 +32,8 @@ import (
@@ -87,3 +109,12 @@ index 7a244d2..bd38f48 100644
  	"go.uber.org/zap"
  	"go.uber.org/zap/zapcore"
  )
+@@ -526,7 +526,7 @@ func (s *Server) serveHTTP3(addr caddy.NetworkAddress, tlsCfg *tls.Config) error
+ 			TLSConfig:      tlsCfg,
+ 			MaxHeaderBytes: s.MaxHeaderBytes,
+ 			// TODO: remove this config when draft versions are no longer supported (we have no need to support drafts)
+-			QuicConfig: &quic.Config{
++			QUICConfig: &quic.Config{
+ 				Versions: []quic.VersionNumber{quic.Version1, quic.Version2},
+ 			},
+ 		}

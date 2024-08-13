@@ -4,4 +4,4 @@
 0004-Add-short-description-for-caddy-command.patch
 0005-Remove-obsolote-subcommands.patch
 0006-Add-variable-for-reproducible-manpage-time-stamps.patch
-0007-quic-go-0.37.4.patch
+0007-quic-go-0.46.0.patch
