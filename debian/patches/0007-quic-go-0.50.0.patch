@@ -8,11 +8,9 @@ Subject: quic-go 0.46.0
  modules/caddyhttp/server.go |  6 +++---
  3 files changed, 19 insertions(+), 19 deletions(-)
 
-diff --git a/listeners.go b/listeners.go
-index ea03ca4..d5906ef 100644
 --- a/listeners.go
 +++ b/listeners.go
-@@ -30,9 +30,10 @@ import (
+@@ -30,9 +30,10 @@
  	"syscall"
  	"time"
  
@@ -25,7 +23,7 @@ index ea03ca4..d5906ef 100644
  )
  
  // NetworkAddress represents one or more network addresses.
-@@ -435,19 +436,18 @@ func ListenPacket(network, addr string) (net.PacketConn, error) {
+@@ -435,19 +436,18 @@
  // NOTE: This API is EXPERIMENTAL and may be changed or removed.
  //
  // TODO: See if we can find a more elegant solution closer to the new NetworkAddress.Listen API.
@@ -54,7 +52,7 @@ index ea03ca4..d5906ef 100644
  		if err != nil {
  			return nil, err
  		}
-@@ -462,7 +462,7 @@ func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (
+@@ -462,7 +462,7 @@
  	// of closes) because closing the quic.EarlyListener doesn't actually close
  	// the underlying PacketConn, but we need to for unix sockets since we dup
  	// the file descriptor and thus need to close the original; track issue:
@@ -63,7 +61,7 @@ index ea03ca4..d5906ef 100644
  	var unix *unixConn
  	if uc, ok := ln.(*unixConn); ok {
  		unix = uc
-@@ -485,7 +485,7 @@ func ListenerUsage(network, addr string) int {
+@@ -485,7 +485,7 @@
  
  // sharedQuicListener is like sharedListener, but for quic.EarlyListeners.
  type sharedQuicListener struct {
@@ -72,11 +70,9 @@ index ea03ca4..d5906ef 100644
  	key string
  }
  
-diff --git a/modules/caddyhttp/app.go b/modules/caddyhttp/app.go
-index 0943b32..9b0c414 100644
 --- a/modules/caddyhttp/app.go
 +++ b/modules/caddyhttp/app.go
-@@ -554,7 +554,7 @@ func (app *App) Stop() error {
+@@ -554,7 +554,7 @@
  
  		// TODO: we have to manually close our listeners because quic-go won't
  		// close listeners it didn't create along with the server itself...
@@ -85,7 +81,7 @@ index 0943b32..9b0c414 100644
  		for _, el := range server.h3listeners {
  			if err := el.Close(); err != nil {
  				app.logger.Error("HTTP/3 listener close",
-@@ -563,7 +563,7 @@ func (app *App) Stop() error {
+@@ -563,7 +563,7 @@
  			}
  		}
  
@@ -94,11 +90,9 @@ index 0943b32..9b0c414 100644
  		if err := server.h3server.Close(); err != nil {
  			app.logger.Error("HTTP/3 server shutdown",
  				zap.Error(err),
-diff --git a/modules/caddyhttp/server.go b/modules/caddyhttp/server.go
-index 7a244d2..11dc16d 100644
 --- a/modules/caddyhttp/server.go
 +++ b/modules/caddyhttp/server.go
-@@ -32,8 +32,8 @@ import (
+@@ -32,8 +32,8 @@
  	"github.com/caddyserver/caddy/v2/modules/caddyevents"
  	"github.com/caddyserver/caddy/v2/modules/caddytls"
  	"github.com/caddyserver/certmagic"
@@ -109,12 +103,23 @@ index 7a244d2..11dc16d 100644
  	"go.uber.org/zap"
  	"go.uber.org/zap/zapcore"
  )
-@@ -526,7 +526,7 @@ func (s *Server) serveHTTP3(addr caddy.NetworkAddress, tlsCfg *tls.Config) error
+@@ -195,7 +195,7 @@
+ 		defer atomic.AddInt64(&s.activeRequests, -1)
+ 
+ 		if r.ProtoMajor < 3 {
+-			err := s.h3server.SetQuicHeaders(w.Header())
++			err := s.h3server.SetQUICHeaders(w.Header())
+ 			if err != nil {
+ 				s.logger.Error("setting HTTP/3 Alt-Svc header", zap.Error(err))
+ 			}
+@@ -526,8 +526,8 @@
  			TLSConfig:      tlsCfg,
  			MaxHeaderBytes: s.MaxHeaderBytes,
  			// TODO: remove this config when draft versions are no longer supported (we have no need to support drafts)
 -			QuicConfig: &quic.Config{
+-				Versions: []quic.VersionNumber{quic.Version1, quic.Version2},
 +			QUICConfig: &quic.Config{
- 				Versions: []quic.VersionNumber{quic.Version1, quic.Version2},
++				Versions: []quic.Version{quic.Version1, quic.Version2},
  			},
  		}
+ 	}
