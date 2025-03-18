@@ -1,9 +1,9 @@
-caddy (2.6.2-9) UNRELEASED; urgency=medium
+caddy (2.6.2-9) unstable; urgency=medium
 
   * Team upload
   * Bump golang-github-quic-go-quic-go-dev to 0.50.0
 
- -- Jérémy Lal <kapouer@melix.org>  Tue, 18 Mar 2025 12:21:03 +0100
+ -- Jérémy Lal <kapouer@melix.org>  Tue, 18 Mar 2025 15:08:14 +0100
 
 caddy (2.6.2-8) unstable; urgency=medium
 
