@@ -54,6 +54,7 @@ Depends: ${misc:Depends},
          ${shlibs:Depends},
          libnss3-tools,
          media-types,
+         passwd,
 Built-Using: ${misc:Built-Using}
 Description: Fast, lightweight web server with automatic HTTPS
  Caddy is a multi purpose web server written in Go.
