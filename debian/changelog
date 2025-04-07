@@ -1,3 +1,10 @@
+caddy (2.6.2-11) UNRELEASED; urgency=medium
+
+  * Team upload
+  * Force rebuild against golang-github-smallstep-certificates-dev (>= 0.20.0-2)
+
+ -- Jérémy Lal <kapouer@melix.org>  Mon, 07 Apr 2025 20:44:34 +0200
+
 caddy (2.6.2-10) unstable; urgency=medium
 
   * Team upload
