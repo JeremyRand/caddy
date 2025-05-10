@@ -1,3 +1,10 @@
+caddy (2.6.2-12) unstable; urgency=medium
+
+  [ Guillaume Pernot ]
+  * Add caddy as an httpd virtual package. Closes: #1068511.
+
+ -- Jérémy Lal <kapouer@melix.org>  Sat, 10 May 2025 09:19:59 +0200
+
 caddy (2.6.2-11) unstable; urgency=medium
 
   * Team upload
