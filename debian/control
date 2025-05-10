@@ -2,7 +2,6 @@ Source: caddy
 Maintainer: Debian Go Packaging Team <team+pkg-go@tracker.debian.org>
 Uploaders: Peymaneh <peymaneh@posteo.net>
 Section: httpd
-Provides: httpd
 Testsuite: autopkgtest-pkg-go
 Priority: optional
 Build-Depends: debhelper-compat (= 13),
@@ -51,6 +50,7 @@ XS-Go-Import-Path: github.com/caddyserver/caddy/v2
 
 Package: caddy
 Architecture: any
+Provides: httpd
 Depends: ${misc:Depends},
          ${shlibs:Depends},
          libnss3-tools,
