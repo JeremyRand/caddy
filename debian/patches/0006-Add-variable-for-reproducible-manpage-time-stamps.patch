@@ -6,11 +6,9 @@ Subject: Add variable for reproducible manpage time stamps
  cmd/commands.go | 19 +++++++++++++++++++
  1 file changed, 19 insertions(+)
 
-diff --git a/cmd/commands.go b/cmd/commands.go
-index c895ec4..3c58a15 100644
 --- a/cmd/commands.go
 +++ b/cmd/commands.go
-@@ -20,12 +20,21 @@ import (
+@@ -20,12 +20,21 @@
  	"os"
  	"regexp"
  	"strings"
@@ -32,7 +30,7 @@ index c895ec4..3c58a15 100644
  // Command represents a subcommand. Name, Func,
  // and Short are required.
  type Command struct {
-@@ -339,6 +348,16 @@ is always printed to stdout.`,
+@@ -339,6 +348,16 @@
  			if err := os.MkdirAll(dir, 0755); err != nil {
  				return caddy.ExitCodeFailedQuit, err
  			}

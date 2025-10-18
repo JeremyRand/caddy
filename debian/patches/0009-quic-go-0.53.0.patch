@@ -1,0 +1,28 @@
+From 11c6daecd7663bd625ec823f585a1c502468b1e7 Mon Sep 17 00:00:00 2001
+From: Marten Seemann <martenseemann@gmail.com>
+Date: Fri, 27 Jun 2025 00:13:08 +0800
+Subject: [PATCH] go.mod: update quic-go to v0.53.0 (#7094)
+
+---
+ listeners.go |  4 ++--
+
+--- a/listeners.go
++++ b/listeners.go
+@@ -436,7 +436,7 @@
+ // NOTE: This API is EXPERIMENTAL and may be changed or removed.
+ //
+ // TODO: See if we can find a more elegant solution closer to the new NetworkAddress.Listen API.
+-func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (http3.QUICEarlyListener, error) {
++func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (http3.QUICListener, error) {
+ 	lnKey := listenerKey("quic+"+ln.LocalAddr().Network(), ln.LocalAddr().String())
+ 
+ 	sharedEarlyListener, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
+@@ -568,7 +568,7 @@
+ // server on which Accept would be called with non-empty contexts
+ // (mind that the default net listeners' Accept doesn't take a context argument)
+ // sounds way too rare for us to sacrifice efficiency here.
+-func (fcql *fakeCloseQuicListener) Accept(_ context.Context) (quic.EarlyConnection, error) {
++func (fcql *fakeCloseQuicListener) Accept(_ context.Context) (*quic.Conn, error) {
+ 	conn, err := fcql.sharedQuicListener.Accept(fcql.context)
+ 	if err == nil {
+ 		return conn, nil

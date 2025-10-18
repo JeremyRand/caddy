@@ -6,11 +6,9 @@ Subject: Add short description for caddy command
  cmd/cobra.go | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)
 
-diff --git a/cmd/cobra.go b/cmd/cobra.go
-index d2a546c..c3f1831 100644
 --- a/cmd/cobra.go
 +++ b/cmd/cobra.go
-@@ -5,7 +5,8 @@ import (
+@@ -5,7 +5,8 @@
  )
  
  var rootCmd = &cobra.Command{

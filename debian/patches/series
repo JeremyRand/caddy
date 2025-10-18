@@ -5,3 +5,4 @@
 0005-Remove-obsolote-subcommands.patch
 0006-Add-variable-for-reproducible-manpage-time-stamps.patch
 0007-quic-go-0.50.0.patch
+0009-quic-go-0.53.0.patch

@@ -7,15 +7,12 @@ forwarded: not-needed
  cmd/commands.go | 76 +++++++++++----------------------------------------------
  1 file changed, 14 insertions(+), 62 deletions(-)
 
-diff --git a/cmd/commands.go b/cmd/commands.go
-index e1e7a53..c895ec4 100644
 --- a/cmd/commands.go
 +++ b/cmd/commands.go
-@@ -329,54 +329,6 @@ is always printed to stdout.`,
- 		}(),
+@@ -330,54 +330,6 @@
  	})
  
--	RegisterCommand(Command{
+ 	RegisterCommand(Command{
 -		Name:  "upgrade",
 -		Func:  cmdUpgrade,
 -		Short: "Upgrade Caddy (EXPERIMENTAL)",
@@ -63,10 +60,11 @@ index e1e7a53..c895ec4 100644
 -		}(),
 -	})
 -
- 	RegisterCommand(Command{
+-	RegisterCommand(Command{
  		Name: "manpage",
  		Func: func(fl Flags) (int, error) {
-@@ -416,40 +368,40 @@ argument of --directory. If the directory does not exist, it will be created.
+ 			dir := strings.TrimSpace(fl.String("directory"))
+@@ -416,40 +368,40 @@
  		Use:   "completion [bash|zsh|fish|powershell]",
  		Short: "Generate completion script",
  		Long: fmt.Sprintf(`To load completions:
