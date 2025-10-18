@@ -1,3 +1,13 @@
+caddy (2.6.2-13) unstable; urgency=medium
+
+  * Team Upload.
+  * Cherry-pick upstream patch to fix FTBFS with latest quic-go
+    (Closes: #1114074)
+  * Bump Standards-Version to 4.7.2 (no changes needed)
+  * Add B-D on golang-github-dustin-go-humanize-dev
+
+ -- Nilesh Patra <nilesh@debian.org>  Sat, 18 Oct 2025 23:40:57 +0530
+
 caddy (2.6.2-12) unstable; urgency=medium
 
   [ Guillaume Pernot ]
