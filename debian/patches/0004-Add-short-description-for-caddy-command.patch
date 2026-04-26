@@ -8,13 +8,19 @@ Subject: Add short description for caddy command
 
 --- a/cmd/cobra.go
 +++ b/cmd/cobra.go
-@@ -5,7 +5,8 @@
- )
+@@ -14,6 +14,7 @@
+ 		bin = "caddy"
+ 	}
  
- var rootCmd = &cobra.Command{
--	Use: "caddy",
-+	Use:   "caddy",
-+	Short: "An extensible server platform",
- 	Long: `Caddy is an extensible server platform written in Go.
++	short := "An extensible server platform"
+ 	long := caddy.CustomLongDescription
+ 	if long == "" {
+ 		long = `Caddy is an extensible server platform written in Go.
+@@ -101,6 +102,7 @@
  
- At its core, Caddy merely manages configuration. Modules are plugged
+ 	return &cobra.Command{
+ 		Use:  bin,
++		Short: short,
+ 		Long: long,
+ 		Example: `  $ caddy run
+   $ caddy run --config caddy.json
