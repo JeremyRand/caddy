@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,9 +28,11 @@ import (
 )
 
 func TestHTTPVarReplacement(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "/foo/bar.tar.gz", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/foo/bar.tar.gz?a=1&b=2", nil)
 	repl := caddy.NewReplacer()
+	localAddr, _ := net.ResolveTCPAddr("tcp", "192.168.159.1:80")
 	ctx := context.WithValue(req.Context(), caddy.ReplacerCtxKey, repl)
+	ctx = context.WithValue(ctx, http.LocalAddrContextKey, localAddr)
 	req = req.WithContext(ctx)
 	req.Host = "example.com:80"
 	req.RemoteAddr = "192.168.159.32:1234"
@@ -96,6 +99,18 @@ eqp31wM9il1n+guTNyxJd+FzVAH+hCZE5K+tCgVDdVFUlDEHHbS/wqb2PSIoouLV
 			expect: "example.com:80",
 		},
 		{
+			get:    "http.request.local.host",
+			expect: "192.168.159.1",
+		},
+		{
+			get:    "http.request.local.port",
+			expect: "80",
+		},
+		{
+			get:    "http.request.local",
+			expect: "192.168.159.1:80",
+		},
+		{
 			get:    "http.request.remote.host",
 			expect: "192.168.159.32",
 		},
@@ -128,6 +143,22 @@ eqp31wM9il1n+guTNyxJd+FzVAH+hCZE5K+tCgVDdVFUlDEHHbS/wqb2PSIoouLV
 			expect: "",
 		},
 		{
+			get:    "http.request.uri",
+			expect: "/foo/bar.tar.gz?a=1&b=2",
+		},
+		{
+			get:    "http.request.uri_escaped",
+			expect: "%2Ffoo%2Fbar.tar.gz%3Fa%3D1%26b%3D2",
+		},
+		{
+			get:    "http.request.uri.path",
+			expect: "/foo/bar.tar.gz",
+		},
+		{
+			get:    "http.request.uri.path_escaped",
+			expect: "%2Ffoo%2Fbar.tar.gz",
+		},
+		{
 			get:    "http.request.uri.path.file",
 			expect: "bar.tar.gz",
 		},
@@ -139,6 +170,26 @@ eqp31wM9il1n+guTNyxJd+FzVAH+hCZE5K+tCgVDdVFUlDEHHbS/wqb2PSIoouLV
 			// not ideal, but also most correct, given that files can have dots (example: index.<SHA>.html) TODO: maybe this isn't right..
 			get:    "http.request.uri.path.file.ext",
 			expect: ".gz",
+		},
+		{
+			get:    "http.request.uri.query",
+			expect: "a=1&b=2",
+		},
+		{
+			get:    "http.request.uri.query_escaped",
+			expect: "a%3D1%26b%3D2",
+		},
+		{
+			get:    "http.request.uri.query.a",
+			expect: "1",
+		},
+		{
+			get:    "http.request.uri.query.b",
+			expect: "2",
+		},
+		{
+			get:    "http.request.uri.prefixed_query",
+			expect: "?a=1&b=2",
 		},
 		{
 			get:    "http.request.tls.cipher_suite",

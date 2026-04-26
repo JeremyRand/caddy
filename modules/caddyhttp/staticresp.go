@@ -17,28 +17,31 @@ package caddyhttp
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
 	"time"
 
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+
+	caddycmd "github.com/caddyserver/caddy/v2/cmd"
+
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
-	caddycmd "github.com/caddyserver/caddy/v2/cmd"
-	"go.uber.org/zap"
 )
 
 func init() {
 	caddy.RegisterModule(StaticResponse{})
 	caddycmd.RegisterCommand(caddycmd.Command{
 		Name:  "respond",
-		Func:  cmdRespond,
 		Usage: `[--status <code>] [--body <content>] [--listen <addr>] [--access-log] [--debug] [--header "Field: value"] <body|status>`,
 		Short: "Simple, hard-coded HTTP responses for development and testing",
 		Long: `
@@ -70,16 +73,15 @@ Access/request logging and more verbose debug logging can also be enabled.
 
 Response headers may be added using the --header flag for each header field.
 `,
-		Flags: func() *flag.FlagSet {
-			fs := flag.NewFlagSet("respond", flag.ExitOnError)
-			fs.String("listen", ":0", "The address to which to bind the listener")
-			fs.Int("status", http.StatusOK, "The response status code")
-			fs.String("body", "", "The body of the HTTP response")
-			fs.Bool("access-log", false, "Enable the access log")
-			fs.Bool("debug", false, "Enable more verbose debug-level logging")
-			fs.Var(&respondCmdHeaders, "header", "Set a header on the response (format: \"Field: value\"")
-			return fs
-		}(),
+		CobraFunc: func(cmd *cobra.Command) {
+			cmd.Flags().StringP("listen", "l", ":0", "The address to which to bind the listener")
+			cmd.Flags().IntP("status", "s", http.StatusOK, "The response status code")
+			cmd.Flags().StringP("body", "b", "", "The body of the HTTP response")
+			cmd.Flags().BoolP("access-log", "", false, "Enable the access log")
+			cmd.Flags().BoolP("debug", "v", false, "Enable more verbose debug-level logging")
+			cmd.Flags().StringArrayP("header", "H", []string{}, "Set a header on the response (format: \"Field: value\")")
+			cmd.RunE = caddycmd.WrapCommandFuncForCobra(cmdRespond)
+		},
 	})
 }
 
@@ -137,41 +139,40 @@ func (StaticResponse) CaddyModule() caddy.ModuleInfo {
 // If there is just one argument (other than the matcher), it is considered
 // to be a status code if it's a valid positive integer of 3 digits.
 func (s *StaticResponse) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		args := d.RemainingArgs()
-		switch len(args) {
-		case 1:
-			if len(args[0]) == 3 {
-				if num, err := strconv.Atoi(args[0]); err == nil && num > 0 {
-					s.StatusCode = WeakString(args[0])
-					break
-				}
+	d.Next() // consume directive name
+	args := d.RemainingArgs()
+	switch len(args) {
+	case 1:
+		if len(args[0]) == 3 {
+			if num, err := strconv.Atoi(args[0]); err == nil && num > 0 {
+				s.StatusCode = WeakString(args[0])
+				break
 			}
-			s.Body = args[0]
-		case 2:
-			s.Body = args[0]
-			s.StatusCode = WeakString(args[1])
-		default:
-			return d.ArgErr()
 		}
+		s.Body = args[0]
+	case 2:
+		s.Body = args[0]
+		s.StatusCode = WeakString(args[1])
+	default:
+		return d.ArgErr()
+	}
 
-		for d.NextBlock(0) {
-			switch d.Val() {
-			case "body":
-				if s.Body != "" {
-					return d.Err("body already specified")
-				}
-				if !d.AllArgs(&s.Body) {
-					return d.ArgErr()
-				}
-			case "close":
-				if s.Close {
-					return d.Err("close already specified")
-				}
-				s.Close = true
-			default:
-				return d.Errf("unrecognized subdirective '%s'", d.Val())
+	for d.NextBlock(0) {
+		switch d.Val() {
+		case "body":
+			if s.Body != "" {
+				return d.Err("body already specified")
 			}
+			if !d.AllArgs(&s.Body) {
+				return d.ArgErr()
+			}
+		case "close":
+			if s.Close {
+				return d.Err("close already specified")
+			}
+			s.Close = true
+		default:
+			return d.Errf("unrecognized subdirective '%s'", d.Val())
 		}
 	}
 	return nil
@@ -193,7 +194,7 @@ func (s StaticResponse) ServeHTTP(w http.ResponseWriter, r *http.Request, next H
 
 	// set all headers
 	for field, vals := range s.Headers {
-		field = repl.ReplaceAll(field, "")
+		field = textproto.CanonicalMIMEHeaderKey(repl.ReplaceAll(field, ""))
 		newVals := make([]string, len(vals))
 		for i := range vals {
 			newVals[i] = repl.ReplaceAll(vals[i], "")
@@ -206,7 +207,7 @@ func (s StaticResponse) ServeHTTP(w http.ResponseWriter, r *http.Request, next H
 	// or for clients to render JSON properly which is very common)
 	body := repl.ReplaceKnown(s.Body, "")
 	if body != "" && w.Header().Get("Content-Type") == "" {
-		content := strings.TrimSpace(s.Body)
+		content := strings.TrimSpace(body)
 		if len(content) > 2 &&
 			(content[0] == '{' && content[len(content)-1] == '}' ||
 				(content[0] == '[' && content[len(content)-1] == ']')) &&
@@ -245,7 +246,7 @@ func (s StaticResponse) ServeHTTP(w http.ResponseWriter, r *http.Request, next H
 
 	// write response body
 	if statusCode != http.StatusEarlyHints && body != "" {
-		fmt.Fprint(w, body)
+		fmt.Fprint(w, body) //nolint:gosec // no XSS unless you sabatoge your own config
 	}
 
 	// continue handling after Early Hints as they are not the final response
@@ -254,6 +255,62 @@ func (s StaticResponse) ServeHTTP(w http.ResponseWriter, r *http.Request, next H
 	}
 
 	return nil
+}
+
+func buildHTTPServer(
+	i int,
+	port uint,
+	addr string,
+	statusCode int,
+	hdr http.Header,
+	body string,
+	accessLog bool,
+) (*Server, error) {
+	// nolint:prealloc
+	var handlers []json.RawMessage
+
+	// response body supports a basic template; evaluate it
+	tplCtx := struct {
+		N       int    // server number
+		Port    uint   // only the port
+		Address string // listener address
+	}{
+		N:       i,
+		Port:    port,
+		Address: addr,
+	}
+	tpl, err := template.New("body").Parse(body)
+	if err != nil {
+		return nil, err
+	}
+	buf := new(bytes.Buffer)
+	err = tpl.Execute(buf, tplCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	// create route with handler
+	handler := StaticResponse{
+		StatusCode: WeakString(fmt.Sprintf("%d", statusCode)),
+		Headers:    hdr,
+		Body:       buf.String(),
+	}
+	handlers = append(handlers, caddyconfig.JSONModuleObject(handler, "handler", "static_response", nil))
+	route := Route{HandlersRaw: handlers}
+
+	server := &Server{
+		Listen:            []string{addr},
+		ReadHeaderTimeout: caddy.Duration(10 * time.Second),
+		IdleTimeout:       caddy.Duration(30 * time.Second),
+		MaxHeaderBytes:    1024 * 10,
+		Routes:            RouteList{route},
+		AutoHTTPS:         &AutoHTTPSConfig{DisableRedir: true},
+	}
+	if accessLog {
+		server.Logs = new(ServerLogConfig)
+	}
+
+	return server, nil
 }
 
 func cmdRespond(fl caddycmd.Flags) (int, error) {
@@ -276,13 +333,7 @@ func cmdRespond(fl caddycmd.Flags) (int, error) {
 
 	// figure out if status code was explicitly specified; this lets
 	// us set a non-zero value as the default but is a little hacky
-	var statusCodeFlagSpecified bool
-	for _, fl := range os.Args {
-		if fl == "--status" {
-			statusCodeFlagSpecified = true
-			break
-		}
-	}
+	statusCodeFlagSpecified := slices.Contains(os.Args, "--status")
 
 	// try to determine what kind of parameter the unnamed argument is
 	if arg != "" {
@@ -317,8 +368,12 @@ func cmdRespond(fl caddycmd.Flags) (int, error) {
 	}
 
 	// build headers map
+	headers, err := fl.GetStringArray("header")
+	if err != nil {
+		return caddy.ExitCodeFailedStartup, fmt.Errorf("invalid header flag: %v", err)
+	}
 	hdr := make(http.Header)
-	for i, h := range respondCmdHeaders {
+	for i, h := range headers {
 		key, val, found := strings.Cut(h, ":")
 		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
 		if !found || key == "" || val == "" {
@@ -327,65 +382,38 @@ func cmdRespond(fl caddycmd.Flags) (int, error) {
 		hdr.Set(key, val)
 	}
 
+	// build each HTTP server
+	httpApp := App{Servers: make(map[string]*Server)}
+
 	// expand listen address, if more than one port
 	listenAddr, err := caddy.ParseNetworkAddress(listen)
 	if err != nil {
 		return caddy.ExitCodeFailedStartup, err
 	}
-	listenAddrs := make([]string, 0, listenAddr.PortRangeSize())
-	for offset := uint(0); offset < listenAddr.PortRangeSize(); offset++ {
-		listenAddrs = append(listenAddrs, listenAddr.JoinHostPort(offset))
-	}
 
-	// build each HTTP server
-	httpApp := App{Servers: make(map[string]*Server)}
-
-	for i, addr := range listenAddrs {
-		var handlers []json.RawMessage
-
-		// response body supports a basic template; evaluate it
-		tplCtx := struct {
-			N       int    // server number
-			Port    uint   // only the port
-			Address string // listener address
-		}{
-			N:       i,
-			Port:    listenAddr.StartPort + uint(i),
-			Address: addr,
+	if !listenAddr.IsUnixNetwork() && !listenAddr.IsFdNetwork() {
+		listenAddrs := make([]string, 0, listenAddr.PortRangeSize())
+		for offset := uint(0); offset < listenAddr.PortRangeSize(); offset++ {
+			listenAddrs = append(listenAddrs, listenAddr.JoinHostPort(offset))
 		}
-		tpl, err := template.New("body").Parse(body)
+
+		for i, addr := range listenAddrs {
+			server, err := buildHTTPServer(i, listenAddr.StartPort+uint(i), addr, statusCode, hdr, body, accessLog)
+			if err != nil {
+				return caddy.ExitCodeFailedStartup, err
+			}
+
+			// save server
+			httpApp.Servers[fmt.Sprintf("static%d", i)] = server
+		}
+	} else {
+		server, err := buildHTTPServer(0, 0, listen, statusCode, hdr, body, accessLog)
 		if err != nil {
 			return caddy.ExitCodeFailedStartup, err
-		}
-		buf := new(bytes.Buffer)
-		err = tpl.Execute(buf, tplCtx)
-		if err != nil {
-			return caddy.ExitCodeFailedStartup, err
-		}
-
-		// create route with handler
-		handler := StaticResponse{
-			StatusCode: WeakString(fmt.Sprintf("%d", statusCode)),
-			Headers:    hdr,
-			Body:       buf.String(),
-		}
-		handlers = append(handlers, caddyconfig.JSONModuleObject(handler, "handler", "static_response", nil))
-		route := Route{HandlersRaw: handlers}
-
-		server := &Server{
-			Listen:            []string{addr},
-			ReadHeaderTimeout: caddy.Duration(10 * time.Second),
-			IdleTimeout:       caddy.Duration(30 * time.Second),
-			MaxHeaderBytes:    1024 * 10,
-			Routes:            RouteList{route},
-			AutoHTTPS:         &AutoHTTPSConfig{DisableRedir: true},
-		}
-		if accessLog {
-			server.Logs = new(ServerLogConfig)
 		}
 
 		// save server
-		httpApp.Servers[fmt.Sprintf("static%d", i)] = server
+		httpApp.Servers[fmt.Sprintf("static%d", 0)] = server
 	}
 
 	// finish building the config
@@ -404,7 +432,7 @@ func cmdRespond(fl caddycmd.Flags) (int, error) {
 	if debug {
 		cfg.Logging = &caddy.Logging{
 			Logs: map[string]*caddy.CustomLog{
-				"default": {Level: zap.DebugLevel.CapitalString()},
+				"default": {BaseLog: caddy.BaseLog{Level: zap.DebugLevel.CapitalString()}},
 			},
 		}
 	}
@@ -430,9 +458,6 @@ func cmdRespond(fl caddycmd.Flags) (int, error) {
 
 	select {}
 }
-
-// respondCmdHeaders holds the parsed values from repeated use of the --header flag.
-var respondCmdHeaders caddycmd.StringSlice
 
 // Interface guards
 var (

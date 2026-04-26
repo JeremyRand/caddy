@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO: Go 1.19 introduced the "unix" build tag. We have to support Go 1.18 until Go 1.20 is released.
-// When Go 1.19 is our minimum, change this build tag to simply "!unix".
-// (see similar change needed in listen_unix.go)
-//go:build !(aix || android || darwin || dragonfly || freebsd || hurd || illumos || ios || linux || netbsd || openbsd || solaris)
+//go:build !unix || solaris
 
 package caddy
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"os"
+	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,13 +30,75 @@ import (
 	"go.uber.org/zap"
 )
 
-func reuseUnixSocket(network, addr string) (any, error) {
+func reuseUnixSocket(_, _ string) (any, error) {
 	return nil, nil
 }
 
-func listenTCPOrUnix(ctx context.Context, lnKey string, network, address string, config net.ListenConfig) (net.Listener, error) {
+func listenReusable(ctx context.Context, lnKey string, network, address string, config net.ListenConfig) (any, error) {
+	var socketFile *os.File
+
+	fd := slices.Contains([]string{"fd", "fdgram"}, network)
+	if fd {
+		socketFd, err := strconv.ParseUint(address, 0, strconv.IntSize)
+		if err != nil {
+			return nil, fmt.Errorf("invalid file descriptor: %v", err)
+		}
+
+		func() {
+			socketFilesMu.Lock()
+			defer socketFilesMu.Unlock()
+
+			socketFdWide := uintptr(socketFd)
+			var ok bool
+
+			socketFile, ok = socketFiles[socketFdWide]
+
+			if !ok {
+				socketFile = os.NewFile(socketFdWide, lnKey)
+				if socketFile != nil {
+					socketFiles[socketFdWide] = socketFile
+				}
+			}
+		}()
+
+		if socketFile == nil {
+			return nil, fmt.Errorf("invalid socket file descriptor: %d", socketFd)
+		}
+	}
+
+	datagram := slices.Contains([]string{"udp", "udp4", "udp6", "unixgram", "fdgram"}, network)
+	if datagram {
+		sharedPc, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
+			var (
+				pc  net.PacketConn
+				err error
+			)
+			if fd {
+				pc, err = net.FilePacketConn(socketFile)
+			} else {
+				pc, err = config.ListenPacket(ctx, network, address)
+			}
+			if err != nil {
+				return nil, err
+			}
+			return &sharedPacketConn{PacketConn: pc, key: lnKey}, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &fakeClosePacketConn{sharedPacketConn: sharedPc.(*sharedPacketConn)}, nil
+	}
+
 	sharedLn, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
-		ln, err := config.Listen(ctx, network, address)
+		var (
+			ln  net.Listener
+			err error
+		)
+		if fd {
+			ln, err = net.FileListener(socketFile)
+		} else {
+			ln, err = config.Listen(ctx, network, address)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -44,7 +107,8 @@ func listenTCPOrUnix(ctx context.Context, lnKey string, network, address string,
 	if err != nil {
 		return nil, err
 	}
-	return &fakeCloseListener{sharedListener: sharedLn.(*sharedListener), keepAlivePeriod: config.KeepAlive}, nil
+
+	return &fakeCloseListener{sharedListener: sharedLn.(*sharedListener), keepAliveConfig: config.KeepAliveConfig}, nil
 }
 
 // fakeCloseListener is a private wrapper over a listener that
@@ -58,12 +122,11 @@ func listenTCPOrUnix(ctx context.Context, lnKey string, network, address string,
 type fakeCloseListener struct {
 	closed          int32 // accessed atomically; belongs to this struct only
 	*sharedListener       // embedded, so we also become a net.Listener
-	keepAlivePeriod time.Duration
+	keepAliveConfig net.KeepAliveConfig
 }
 
-type canSetKeepAlive interface {
-	SetKeepAlivePeriod(d time.Duration) error
-	SetKeepAlive(bool) error
+type canSetKeepAliveConfig interface {
+	SetKeepAliveConfig(config net.KeepAliveConfig) error
 }
 
 func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
@@ -77,12 +140,8 @@ func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
 	if err == nil {
 		// if 0, do nothing, Go's default is already set
 		// and if the connection allows setting KeepAlive, set it
-		if tconn, ok := conn.(canSetKeepAlive); ok && fcl.keepAlivePeriod != 0 {
-			if fcl.keepAlivePeriod > 0 {
-				err = tconn.SetKeepAlivePeriod(fcl.keepAlivePeriod)
-			} else { // negative
-				err = tconn.SetKeepAlive(false)
-			}
+		if tconn, ok := conn.(canSetKeepAliveConfig); ok && fcl.keepAliveConfig.Enable {
+			err = tconn.SetKeepAliveConfig(fcl.keepAliveConfig)
 			if err != nil {
 				Log().With(zap.String("server", fcl.sharedListener.key)).Warn("unable to set keepalive for new connection:", zap.Error(err))
 			}
@@ -101,7 +160,7 @@ func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
 		// so that it's clear in the code that side-effects are shared with other
 		// users of this listener, not just our own reference to it; we also don't
 		// do anything with the error because all we could do is log it, but we
-		// expliclty assign it to nothing so we don't forget it's there if needed
+		// explicitly assign it to nothing so we don't forget it's there if needed
 		_ = fcl.sharedListener.clearDeadline()
 
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -175,3 +234,81 @@ func (sl *sharedListener) setDeadline() error {
 func (sl *sharedListener) Destruct() error {
 	return sl.Listener.Close()
 }
+
+// fakeClosePacketConn is like fakeCloseListener, but for PacketConns,
+// or more specifically, *net.UDPConn
+type fakeClosePacketConn struct {
+	closed            int32 // accessed atomically; belongs to this struct only
+	*sharedPacketConn       // embedded, so we also become a net.PacketConn; its key is used in Close
+}
+
+func (fcpc *fakeClosePacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+	// if the listener is already "closed", return error
+	if atomic.LoadInt32(&fcpc.closed) == 1 {
+		return 0, nil, &net.OpError{
+			Op:   "readfrom",
+			Net:  fcpc.LocalAddr().Network(),
+			Addr: fcpc.LocalAddr(),
+			Err:  errFakeClosed,
+		}
+	}
+
+	// call underlying readfrom
+	n, addr, err = fcpc.sharedPacketConn.ReadFrom(p)
+	if err != nil {
+		// this server was stopped, so clear the deadline and let
+		// any new server continue reading; but we will exit
+		if atomic.LoadInt32(&fcpc.closed) == 1 {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				if err = fcpc.SetReadDeadline(time.Time{}); err != nil {
+					return n, addr, err
+				}
+			}
+		}
+		return n, addr, err
+	}
+
+	return n, addr, err
+}
+
+// Close won't close the underlying socket unless there is no more reference, then listenerPool will close it.
+func (fcpc *fakeClosePacketConn) Close() error {
+	if atomic.CompareAndSwapInt32(&fcpc.closed, 0, 1) {
+		_ = fcpc.SetReadDeadline(time.Now()) // unblock ReadFrom() calls to kick old servers out of their loops
+		_, _ = listenerPool.Delete(fcpc.sharedPacketConn.key)
+	}
+	return nil
+}
+
+func (fcpc *fakeClosePacketConn) Unwrap() net.PacketConn {
+	return fcpc.sharedPacketConn.PacketConn
+}
+
+// sharedPacketConn is like sharedListener, but for net.PacketConns.
+type sharedPacketConn struct {
+	net.PacketConn
+	key string
+}
+
+// Destruct closes the underlying socket.
+func (spc *sharedPacketConn) Destruct() error {
+	return spc.PacketConn.Close()
+}
+
+// Unwrap returns the underlying socket
+func (spc *sharedPacketConn) Unwrap() net.PacketConn {
+	return spc.PacketConn
+}
+
+// Interface guards (see https://github.com/caddyserver/caddy/issues/3998)
+var (
+	_ (interface {
+		Unwrap() net.PacketConn
+	}) = (*fakeClosePacketConn)(nil)
+)
+
+// socketFiles is a fd -> *os.File map used to make a FileListener/FilePacketConn from a socket file descriptor.
+var socketFiles = map[uintptr]*os.File{}
+
+// socketFilesMu synchronizes socketFiles insertions
+var socketFilesMu sync.Mutex

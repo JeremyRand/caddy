@@ -17,6 +17,7 @@ package forwardauth
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
@@ -83,7 +84,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) ([]httpcaddyfile.ConfigValue, error)
 	// create the reverse proxy handler
 	rpHandler := &reverseproxy.Handler{
 		// set up defaults for header_up; reverse_proxy already deals with
-		// adding  the other three X-Forwarded-* headers, but for this flow,
+		// adding the other three X-Forwarded-* headers, but for this flow,
 		// we want to also send along the incoming method and URI since this
 		// request will have a rewritten URI and method.
 		Headers: &headers.Handler{
@@ -129,8 +130,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) ([]httpcaddyfile.ConfigValue, error)
 					return nil, dispenser.ArgErr()
 				}
 				rpHandler.Rewrite.URI = dispenser.Val()
-				dispenser.Delete()
-				dispenser.Delete()
+				dispenser.DeleteN(2)
 
 			case "copy_headers":
 				args := dispenser.RemainingArgs()
@@ -140,13 +140,11 @@ func parseCaddyfile(h httpcaddyfile.Helper) ([]httpcaddyfile.ConfigValue, error)
 					args = append(args, dispenser.Val())
 				}
 
-				dispenser.Delete() // directive name
+				// directive name + args
+				dispenser.DeleteN(len(args) + 1)
 				if hadBlock {
-					dispenser.Delete() // opening brace
-					dispenser.Delete() // closing brace
-				}
-				for range args {
-					dispenser.Delete()
+					// opening & closing brace
+					dispenser.DeleteN(2)
 				}
 
 				for _, headerField := range args {
@@ -173,42 +171,84 @@ func parseCaddyfile(h httpcaddyfile.Helper) ([]httpcaddyfile.ConfigValue, error)
 		return nil, dispenser.Errf("the 'uri' subdirective is required")
 	}
 
-	// set up handler for good responses; when a response
-	// has 2xx status, then we will copy some headers from
-	// the response onto the original request, and allow
-	// handling to continue down the middleware chain,
-	// by _not_ executing a terminal handler.
+	// Set up handler for good responses; when a response has 2xx status,
+	// then we will copy some headers from the response onto the original
+	// request, and allow handling to continue down the middleware chain,
+	// by _not_ executing a terminal handler. We must have at least one
+	// route in the response handler, even if it's no-op, so that the
+	// response handling logic in reverse_proxy doesn't skip this entry.
 	goodResponseHandler := caddyhttp.ResponseHandler{
 		Match: &caddyhttp.ResponseMatcher{
 			StatusCode: []int{2},
 		},
-		Routes: []caddyhttp.Route{},
-	}
-
-	handler := &headers.Handler{
-		Request: &headers.HeaderOps{
-			Set: http.Header{},
+		Routes: []caddyhttp.Route{
+			{
+				HandlersRaw: []json.RawMessage{caddyconfig.JSONModuleObject(
+					&caddyhttp.VarsMiddleware{},
+					"handler",
+					"vars",
+					nil,
+				)},
+			},
 		},
 	}
 
-	// the list of headers to copy may be empty, but that's okay; we
-	// need at least one handler in the routes for the response handling
-	// logic in reverse_proxy to not skip this entry as empty.
-	for from, to := range headersToCopy {
-		handler.Request.Set.Set(to, "{http.reverse_proxy.header."+http.CanonicalHeaderKey(from)+"}")
+	// Sort the headers so that the order in the JSON output is deterministic.
+	sortedHeadersToCopy := make([]string, 0, len(headersToCopy))
+	for k := range headersToCopy {
+		sortedHeadersToCopy = append(sortedHeadersToCopy, k)
 	}
+	sort.Strings(sortedHeadersToCopy)
 
-	goodResponseHandler.Routes = append(
-		goodResponseHandler.Routes,
-		caddyhttp.Route{
+	// Set up handlers to copy headers from the auth response onto the
+	// original request. We use vars matchers to test that the placeholder
+	// values aren't empty, because the header handler would not replace
+	// placeholders which have no value.
+	copyHeaderRoutes := []caddyhttp.Route{}
+	for _, from := range sortedHeadersToCopy {
+		to := http.CanonicalHeaderKey(headersToCopy[from])
+		placeholderName := "http.reverse_proxy.header." + http.CanonicalHeaderKey(from)
+
+		// Always delete the client-supplied header before conditionally setting
+		// it from the auth response. Without this, a client that pre-supplies a
+		// header listed in copy_headers can inject arbitrary values when the auth
+		// service does not return that header: the MatchNot guard below would
+		// skip the Set entirely, leaving the original client-controlled value
+		// intact and forwarding it to the backend.
+		copyHeaderRoutes = append(copyHeaderRoutes, caddyhttp.Route{
+			HandlersRaw: []json.RawMessage{caddyconfig.JSONModuleObject(
+				&headers.Handler{
+					Request: &headers.HeaderOps{
+						Delete: []string{to},
+					},
+				},
+				"handler", "headers", nil,
+			)},
+		})
+
+		handler := &headers.Handler{
+			Request: &headers.HeaderOps{
+				Set: http.Header{
+					to: []string{"{" + placeholderName + "}"},
+				},
+			},
+		}
+		copyHeaderRoutes = append(copyHeaderRoutes, caddyhttp.Route{
+			MatcherSetsRaw: []caddy.ModuleMap{{
+				"not": h.JSON(caddyhttp.MatchNot{MatcherSetsRaw: []caddy.ModuleMap{{
+					"vars": h.JSON(caddyhttp.VarsMatcher{"{" + placeholderName + "}": []string{""}}),
+				}}}),
+			}},
 			HandlersRaw: []json.RawMessage{caddyconfig.JSONModuleObject(
 				handler,
 				"handler",
 				"headers",
 				nil,
 			)},
-		},
-	)
+		})
+	}
+
+	goodResponseHandler.Routes = append(goodResponseHandler.Routes, copyHeaderRoutes...)
 
 	// note that when a response has any other status than 2xx, then we
 	// use the reverse proxy's default behaviour of copying the response
@@ -219,6 +259,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) ([]httpcaddyfile.ConfigValue, error)
 
 	// the rest of the config is specified by the user
 	// using the reverse_proxy directive syntax
+	dispenser.Next() // consume the directive name
 	err = rpHandler.UnmarshalCaddyfile(dispenser)
 	if err != nil {
 		return nil, err

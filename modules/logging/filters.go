@@ -25,10 +25,11 @@ import (
 	"strconv"
 	"strings"
 
+	"go.uber.org/zap/zapcore"
+
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"go.uber.org/zap/zapcore"
 )
 
 func init() {
@@ -40,6 +41,7 @@ func init() {
 	caddy.RegisterModule(CookieFilter{})
 	caddy.RegisterModule(RegexpFilter{})
 	caddy.RegisterModule(RenameFilter{})
+	caddy.RegisterModule(MultiRegexpFilter{})
 }
 
 // LogFieldFilter can filter (or manipulate)
@@ -81,8 +83,7 @@ func hash(s string) string {
 // of the SHA-256 hash of the content. Operates
 // on string fields, or on arrays of strings
 // where each string is hashed.
-type HashFilter struct {
-}
+type HashFilter struct{}
 
 // CaddyModule returns the Caddy module information.
 func (HashFilter) CaddyModule() caddy.ModuleInfo {
@@ -100,12 +101,15 @@ func (f *HashFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 // Filter filters the input field with the replacement value.
 func (f *HashFilter) Filter(in zapcore.Field) zapcore.Field {
 	if array, ok := in.Interface.(caddyhttp.LoggableStringArray); ok {
+		newArray := make(caddyhttp.LoggableStringArray, len(array))
 		for i, s := range array {
-			array[i] = hash(s)
+			newArray[i] = hash(s)
 		}
+		in.Interface = newArray
 	} else {
 		in.String = hash(in.String)
 	}
+
 	return in
 }
 
@@ -125,10 +129,9 @@ func (ReplaceFilter) CaddyModule() caddy.ModuleInfo {
 
 // UnmarshalCaddyfile sets up the module from Caddyfile tokens.
 func (f *ReplaceFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		if d.NextArg() {
-			f.Value = d.Val()
-		}
+	d.Next() // consume filter name
+	if d.NextArg() {
+		f.Value = d.Val()
 	}
 	return nil
 }
@@ -166,32 +169,52 @@ func (IPMaskFilter) CaddyModule() caddy.ModuleInfo {
 
 // UnmarshalCaddyfile sets up the module from Caddyfile tokens.
 func (m *IPMaskFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		for d.NextBlock(0) {
-			switch d.Val() {
-			case "ipv4":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-				val, err := strconv.Atoi(d.Val())
-				if err != nil {
-					return d.Errf("error parsing %s: %v", d.Val(), err)
-				}
-				m.IPv4MaskRaw = val
+	d.Next() // consume filter name
 
-			case "ipv6":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-				val, err := strconv.Atoi(d.Val())
-				if err != nil {
-					return d.Errf("error parsing %s: %v", d.Val(), err)
-				}
-				m.IPv6MaskRaw = val
+	args := d.RemainingArgs()
+	if len(args) > 2 {
+		return d.Errf("too many arguments")
+	}
+	if len(args) > 0 {
+		val, err := strconv.Atoi(args[0])
+		if err != nil {
+			return d.Errf("error parsing %s: %v", args[0], err)
+		}
+		m.IPv4MaskRaw = val
 
-			default:
-				return d.Errf("unrecognized subdirective %s", d.Val())
+		if len(args) > 1 {
+			val, err := strconv.Atoi(args[1])
+			if err != nil {
+				return d.Errf("error parsing %s: %v", args[1], err)
 			}
+			m.IPv6MaskRaw = val
+		}
+	}
+
+	for d.NextBlock(0) {
+		switch d.Val() {
+		case "ipv4":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			val, err := strconv.Atoi(d.Val())
+			if err != nil {
+				return d.Errf("error parsing %s: %v", d.Val(), err)
+			}
+			m.IPv4MaskRaw = val
+
+		case "ipv6":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			val, err := strconv.Atoi(d.Val())
+			if err != nil {
+				return d.Errf("error parsing %s: %v", d.Val(), err)
+			}
+			m.IPv6MaskRaw = val
+
+		default:
+			return d.Errf("unrecognized subdirective %s", d.Val())
 		}
 	}
 	return nil
@@ -219,9 +242,11 @@ func (m *IPMaskFilter) Provision(ctx caddy.Context) error {
 // Filter filters the input field.
 func (m IPMaskFilter) Filter(in zapcore.Field) zapcore.Field {
 	if array, ok := in.Interface.(caddyhttp.LoggableStringArray); ok {
+		newArray := make(caddyhttp.LoggableStringArray, len(array))
 		for i, s := range array {
-			array[i] = m.mask(s)
+			newArray[i] = m.mask(s)
 		}
+		in.Interface = newArray
 	} else {
 		in.String = m.mask(in.String)
 	}
@@ -230,8 +255,8 @@ func (m IPMaskFilter) Filter(in zapcore.Field) zapcore.Field {
 }
 
 func (m IPMaskFilter) mask(s string) string {
-	output := ""
-	for _, value := range strings.Split(s, ",") {
+	parts := make([]string, 0)
+	for value := range strings.SplitSeq(s, ",") {
 		value = strings.TrimSpace(value)
 		host, port, err := net.SplitHostPort(value)
 		if err != nil {
@@ -239,7 +264,7 @@ func (m IPMaskFilter) mask(s string) string {
 		}
 		ipAddr := net.ParseIP(host)
 		if ipAddr == nil {
-			output += value + ", "
+			parts = append(parts, value)
 			continue
 		}
 		mask := m.v4Mask
@@ -248,13 +273,13 @@ func (m IPMaskFilter) mask(s string) string {
 		}
 		masked := ipAddr.Mask(mask)
 		if port == "" {
-			output += masked.String() + ", "
+			parts = append(parts, masked.String())
 			continue
 		}
 
-		output += net.JoinHostPort(masked.String(), port) + ", "
+		parts = append(parts, net.JoinHostPort(masked.String(), port))
 	}
-	return strings.TrimSuffix(output, ", ")
+	return strings.Join(parts, ", ")
 }
 
 type filterAction string
@@ -323,54 +348,67 @@ func (QueryFilter) CaddyModule() caddy.ModuleInfo {
 
 // UnmarshalCaddyfile sets up the module from Caddyfile tokens.
 func (m *QueryFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		for d.NextBlock(0) {
-			qfa := queryFilterAction{}
-			switch d.Val() {
-			case "replace":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-
-				qfa.Type = replaceAction
-				qfa.Parameter = d.Val()
-
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-				qfa.Value = d.Val()
-
-			case "hash":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-
-				qfa.Type = hashAction
-				qfa.Parameter = d.Val()
-
-			case "delete":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-
-				qfa.Type = deleteAction
-				qfa.Parameter = d.Val()
-
-			default:
-				return d.Errf("unrecognized subdirective %s", d.Val())
+	d.Next() // consume filter name
+	for d.NextBlock(0) {
+		qfa := queryFilterAction{}
+		switch d.Val() {
+		case "replace":
+			if !d.NextArg() {
+				return d.ArgErr()
 			}
 
-			m.Actions = append(m.Actions, qfa)
+			qfa.Type = replaceAction
+			qfa.Parameter = d.Val()
+
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			qfa.Value = d.Val()
+
+		case "hash":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+
+			qfa.Type = hashAction
+			qfa.Parameter = d.Val()
+
+		case "delete":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+
+			qfa.Type = deleteAction
+			qfa.Parameter = d.Val()
+
+		default:
+			return d.Errf("unrecognized subdirective %s", d.Val())
 		}
+
+		m.Actions = append(m.Actions, qfa)
 	}
 	return nil
 }
 
 // Filter filters the input field.
 func (m QueryFilter) Filter(in zapcore.Field) zapcore.Field {
-	u, err := url.Parse(in.String)
+	if array, ok := in.Interface.(caddyhttp.LoggableStringArray); ok {
+		newArray := make(caddyhttp.LoggableStringArray, len(array))
+		for i, s := range array {
+			newArray[i] = m.processQueryString(s)
+		}
+		in.Interface = newArray
+	} else {
+		in.String = m.processQueryString(in.String)
+	}
+
+	return in
+}
+
+func (m QueryFilter) processQueryString(s string) string {
+	u, err := url.Parse(s)
 	if err != nil {
-		return in
+		return s
 	}
 
 	q := u.Query()
@@ -392,9 +430,7 @@ func (m QueryFilter) Filter(in zapcore.Field) zapcore.Field {
 	}
 
 	u.RawQuery = q.Encode()
-	in.String = u.String()
-
-	return in
+	return u.String()
 }
 
 type cookieFilterAction struct {
@@ -443,45 +479,44 @@ func (CookieFilter) CaddyModule() caddy.ModuleInfo {
 
 // UnmarshalCaddyfile sets up the module from Caddyfile tokens.
 func (m *CookieFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		for d.NextBlock(0) {
-			cfa := cookieFilterAction{}
-			switch d.Val() {
-			case "replace":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-
-				cfa.Type = replaceAction
-				cfa.Name = d.Val()
-
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-				cfa.Value = d.Val()
-
-			case "hash":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-
-				cfa.Type = hashAction
-				cfa.Name = d.Val()
-
-			case "delete":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
-
-				cfa.Type = deleteAction
-				cfa.Name = d.Val()
-
-			default:
-				return d.Errf("unrecognized subdirective %s", d.Val())
+	d.Next() // consume filter name
+	for d.NextBlock(0) {
+		cfa := cookieFilterAction{}
+		switch d.Val() {
+		case "replace":
+			if !d.NextArg() {
+				return d.ArgErr()
 			}
 
-			m.Actions = append(m.Actions, cfa)
+			cfa.Type = replaceAction
+			cfa.Name = d.Val()
+
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			cfa.Value = d.Val()
+
+		case "hash":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+
+			cfa.Type = hashAction
+			cfa.Name = d.Val()
+
+		case "delete":
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+
+			cfa.Type = deleteAction
+			cfa.Name = d.Val()
+
+		default:
+			return d.Errf("unrecognized subdirective %s", d.Val())
 		}
+
+		m.Actions = append(m.Actions, cfa)
 	}
 	return nil
 }
@@ -554,13 +589,12 @@ func (RegexpFilter) CaddyModule() caddy.ModuleInfo {
 
 // UnmarshalCaddyfile sets up the module from Caddyfile tokens.
 func (f *RegexpFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		if d.NextArg() {
-			f.RawRegexp = d.Val()
-		}
-		if d.NextArg() {
-			f.Value = d.Val()
-		}
+	d.Next() // consume filter name
+	if d.NextArg() {
+		f.RawRegexp = d.Val()
+	}
+	if d.NextArg() {
+		f.Value = d.Val()
 	}
 	return nil
 }
@@ -580,14 +614,232 @@ func (m *RegexpFilter) Provision(ctx caddy.Context) error {
 // Filter filters the input field with the replacement value if it matches the regexp.
 func (f *RegexpFilter) Filter(in zapcore.Field) zapcore.Field {
 	if array, ok := in.Interface.(caddyhttp.LoggableStringArray); ok {
+		newArray := make(caddyhttp.LoggableStringArray, len(array))
 		for i, s := range array {
-			array[i] = f.regexp.ReplaceAllString(s, f.Value)
+			newArray[i] = f.regexp.ReplaceAllString(s, f.Value)
 		}
+		in.Interface = newArray
 	} else {
 		in.String = f.regexp.ReplaceAllString(in.String, f.Value)
 	}
 
 	return in
+}
+
+// regexpFilterOperation represents a single regexp operation
+// within a MultiRegexpFilter.
+type regexpFilterOperation struct {
+	// The regular expression pattern defining what to replace.
+	RawRegexp string `json:"regexp,omitempty"`
+
+	// The value to use as replacement
+	Value string `json:"value,omitempty"`
+
+	regexp *regexp.Regexp
+}
+
+// MultiRegexpFilter is a Caddy log field filter that
+// can apply multiple regular expression replacements to
+// the same field. This filter processes operations in the
+// order they are defined, applying each regexp replacement
+// sequentially to the result of the previous operation.
+//
+// This allows users to define multiple regexp filters for
+// the same field without them overwriting each other.
+//
+// Security considerations:
+// - Uses Go's regexp package (RE2 engine) which is safe from ReDoS attacks
+// - Validates all patterns during provisioning
+// - Limits the maximum number of operations to prevent resource exhaustion
+// - Sanitizes input to prevent injection attacks
+type MultiRegexpFilter struct {
+	// A list of regexp operations to apply in sequence.
+	// Maximum of 50 operations allowed for security and performance.
+	Operations []regexpFilterOperation `json:"operations"`
+}
+
+// Security constants
+const (
+	maxRegexpOperations = 50   // Maximum operations to prevent resource exhaustion
+	maxPatternLength    = 1000 // Maximum pattern length to prevent abuse
+)
+
+// CaddyModule returns the Caddy module information.
+func (MultiRegexpFilter) CaddyModule() caddy.ModuleInfo {
+	return caddy.ModuleInfo{
+		ID:  "caddy.logging.encoders.filter.multi_regexp",
+		New: func() caddy.Module { return new(MultiRegexpFilter) },
+	}
+}
+
+// UnmarshalCaddyfile sets up the module from Caddyfile tokens.
+// Syntax:
+//
+//	multi_regexp {
+//	    regexp <pattern> <replacement>
+//	    regexp <pattern> <replacement>
+//	    ...
+//	}
+func (f *MultiRegexpFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
+	d.Next() // consume filter name
+	for d.NextBlock(0) {
+		switch d.Val() {
+		case "regexp":
+			// Security check: limit number of operations
+			if len(f.Operations) >= maxRegexpOperations {
+				return d.Errf("too many regexp operations (maximum %d allowed)", maxRegexpOperations)
+			}
+
+			op := regexpFilterOperation{}
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			op.RawRegexp = d.Val()
+
+			// Security validation: check pattern length
+			if len(op.RawRegexp) > maxPatternLength {
+				return d.Errf("regexp pattern too long (maximum %d characters)", maxPatternLength)
+			}
+
+			// Security validation: basic pattern validation
+			if op.RawRegexp == "" {
+				return d.Errf("regexp pattern cannot be empty")
+			}
+
+			if !d.NextArg() {
+				return d.ArgErr()
+			}
+			op.Value = d.Val()
+			f.Operations = append(f.Operations, op)
+		default:
+			return d.Errf("unrecognized subdirective %s", d.Val())
+		}
+	}
+
+	// Security check: ensure at least one operation is defined
+	if len(f.Operations) == 0 {
+		return d.Err("multi_regexp filter requires at least one regexp operation")
+	}
+
+	return nil
+}
+
+// Provision compiles all regexp patterns with security validation.
+func (f *MultiRegexpFilter) Provision(ctx caddy.Context) error {
+	// Security check: validate operation count
+	if len(f.Operations) > maxRegexpOperations {
+		return fmt.Errorf("too many regexp operations: %d (maximum %d allowed)", len(f.Operations), maxRegexpOperations)
+	}
+
+	if len(f.Operations) == 0 {
+		return fmt.Errorf("multi_regexp filter requires at least one operation")
+	}
+
+	for i := range f.Operations {
+		// Security validation: pattern length check
+		if len(f.Operations[i].RawRegexp) > maxPatternLength {
+			return fmt.Errorf("regexp pattern %d too long: %d characters (maximum %d)", i, len(f.Operations[i].RawRegexp), maxPatternLength)
+		}
+
+		// Security validation: empty pattern check
+		if f.Operations[i].RawRegexp == "" {
+			return fmt.Errorf("regexp pattern %d cannot be empty", i)
+		}
+
+		// Compile and validate the pattern (uses RE2 engine - safe from ReDoS)
+		r, err := regexp.Compile(f.Operations[i].RawRegexp)
+		if err != nil {
+			return fmt.Errorf("compiling regexp pattern %d (%s): %v", i, f.Operations[i].RawRegexp, err)
+		}
+		f.Operations[i].regexp = r
+	}
+	return nil
+}
+
+// Validate ensures the filter is properly configured with security checks.
+func (f *MultiRegexpFilter) Validate() error {
+	if len(f.Operations) == 0 {
+		return fmt.Errorf("multi_regexp filter requires at least one operation")
+	}
+
+	if len(f.Operations) > maxRegexpOperations {
+		return fmt.Errorf("too many regexp operations: %d (maximum %d allowed)", len(f.Operations), maxRegexpOperations)
+	}
+
+	for i, op := range f.Operations {
+		if op.RawRegexp == "" {
+			return fmt.Errorf("regexp pattern %d cannot be empty", i)
+		}
+		if len(op.RawRegexp) > maxPatternLength {
+			return fmt.Errorf("regexp pattern %d too long: %d characters (maximum %d)", i, len(op.RawRegexp), maxPatternLength)
+		}
+		if op.regexp == nil {
+			return fmt.Errorf("regexp pattern %d not compiled (call Provision first)", i)
+		}
+	}
+	return nil
+}
+
+// Filter applies all regexp operations sequentially to the input field.
+// Input is sanitized and validated for security.
+func (f *MultiRegexpFilter) Filter(in zapcore.Field) zapcore.Field {
+	if array, ok := in.Interface.(caddyhttp.LoggableStringArray); ok {
+		newArray := make(caddyhttp.LoggableStringArray, len(array))
+		for i, s := range array {
+			newArray[i] = f.processString(s)
+		}
+		in.Interface = newArray
+	} else {
+		in.String = f.processString(in.String)
+	}
+
+	return in
+}
+
+// processString applies all regexp operations to a single string with input validation.
+func (f *MultiRegexpFilter) processString(s string) string {
+	// Security: validate input string length to prevent resource exhaustion
+	const maxInputLength = 1000000 // 1MB max input size
+	if len(s) > maxInputLength {
+		// Log warning but continue processing (truncated)
+		s = s[:maxInputLength]
+	}
+
+	result := s
+	for _, op := range f.Operations {
+		// Each regexp operation is applied sequentially
+		// Using RE2 engine which is safe from ReDoS attacks
+		result = op.regexp.ReplaceAllString(result, op.Value)
+
+		// Ensure result doesn't exceed max length after each operation
+		if len(result) > maxInputLength {
+			result = result[:maxInputLength]
+		}
+	}
+	return result
+}
+
+// AddOperation adds a single regexp operation to the filter with validation.
+// This is used when merging multiple RegexpFilter instances.
+func (f *MultiRegexpFilter) AddOperation(rawRegexp, value string) error {
+	// Security checks
+	if len(f.Operations) >= maxRegexpOperations {
+		return fmt.Errorf("cannot add operation: maximum %d operations allowed", maxRegexpOperations)
+	}
+
+	if rawRegexp == "" {
+		return fmt.Errorf("regexp pattern cannot be empty")
+	}
+
+	if len(rawRegexp) > maxPatternLength {
+		return fmt.Errorf("regexp pattern too long: %d characters (maximum %d)", len(rawRegexp), maxPatternLength)
+	}
+
+	f.Operations = append(f.Operations, regexpFilterOperation{
+		RawRegexp: rawRegexp,
+		Value:     value,
+	})
+	return nil
 }
 
 // RenameFilter is a Caddy log field filter that
@@ -606,10 +858,9 @@ func (RenameFilter) CaddyModule() caddy.ModuleInfo {
 
 // UnmarshalCaddyfile sets up the module from Caddyfile tokens.
 func (f *RenameFilter) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		if d.NextArg() {
-			f.Name = d.Val()
-		}
+	d.Next() // consume filter name
+	if d.NextArg() {
+		f.Name = d.Val()
 	}
 	return nil
 }
@@ -630,6 +881,7 @@ var (
 	_ LogFieldFilter = (*CookieFilter)(nil)
 	_ LogFieldFilter = (*RegexpFilter)(nil)
 	_ LogFieldFilter = (*RenameFilter)(nil)
+	_ LogFieldFilter = (*MultiRegexpFilter)(nil)
 
 	_ caddyfile.Unmarshaler = (*DeleteFilter)(nil)
 	_ caddyfile.Unmarshaler = (*HashFilter)(nil)
@@ -639,9 +891,12 @@ var (
 	_ caddyfile.Unmarshaler = (*CookieFilter)(nil)
 	_ caddyfile.Unmarshaler = (*RegexpFilter)(nil)
 	_ caddyfile.Unmarshaler = (*RenameFilter)(nil)
+	_ caddyfile.Unmarshaler = (*MultiRegexpFilter)(nil)
 
 	_ caddy.Provisioner = (*IPMaskFilter)(nil)
 	_ caddy.Provisioner = (*RegexpFilter)(nil)
+	_ caddy.Provisioner = (*MultiRegexpFilter)(nil)
 
 	_ caddy.Validator = (*QueryFilter)(nil)
+	_ caddy.Validator = (*MultiRegexpFilter)(nil)
 )

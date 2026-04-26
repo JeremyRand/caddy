@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -333,19 +335,25 @@ func ParseStructTag(tag string) (map[string]string, error) {
 	return results, nil
 }
 
-// strictUnmarshalJSON is like json.Unmarshal but returns an error
+// StrictUnmarshalJSON is like json.Unmarshal but returns an error
 // if any of the fields are unrecognized. Useful when decoding
 // module configurations, where you want to be more sure they're
 // correct.
-func strictUnmarshalJSON(data []byte, v any) error {
+func StrictUnmarshalJSON(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	return dec.Decode(v)
+	err := dec.Decode(v)
+	if jsonErr, ok := err.(*json.SyntaxError); ok {
+		return fmt.Errorf("%w, at offset %d", jsonErr, jsonErr.Offset)
+	}
+	return err
 }
+
+var JSONRawMessageType = reflect.TypeFor[json.RawMessage]()
 
 // isJSONRawMessage returns true if the type is encoding/json.RawMessage.
 func isJSONRawMessage(typ reflect.Type) bool {
-	return typ.PkgPath() == "encoding/json" && typ.Name() == "RawMessage"
+	return typ == JSONRawMessageType
 }
 
 // isModuleMapType returns true if the type is map[string]json.RawMessage.
@@ -358,6 +366,14 @@ func isModuleMapType(typ reflect.Type) bool {
 	return typ.Kind() == reflect.Map &&
 		typ.Key().Kind() == reflect.String &&
 		isJSONRawMessage(typ.Elem())
+}
+
+// ProxyFuncProducer is implemented by modules which produce a
+// function that returns a URL to use as network proxy. Modules
+// in the namespace `caddy.network_proxy` must implement this
+// interface.
+type ProxyFuncProducer interface {
+	ProxyFunc() func(*http.Request) (*url.URL, error)
 }
 
 var (
