@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/caddyserver/caddy/v2"
@@ -76,6 +77,11 @@ func TestHostMatcher(t *testing.T) {
 			match:  MatchHost{"foo.example.com"},
 			input:  "bar.example.com",
 			expect: false,
+		},
+		{
+			match:  MatchHost{"éxàmplê.com"},
+			input:  "xn--xmpl-0na6cm.com",
+			expect: true,
 		},
 		{
 			match:  MatchHost{"*.example.com"},
@@ -148,7 +154,14 @@ func TestHostMatcher(t *testing.T) {
 		ctx := context.WithValue(req.Context(), caddy.ReplacerCtxKey, repl)
 		req = req.WithContext(ctx)
 
-		actual := tc.match.Match(req)
+		if err := tc.match.Provision(caddy.Context{}); err != nil {
+			t.Errorf("Test %d %v: provisioning failed: %v", i, tc.match, err)
+		}
+
+		actual, err := tc.match.MatchWithError(req)
+		if err != nil {
+			t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+		}
 		if actual != tc.expect {
 			t.Errorf("Test %d %v: Expected %t, got %t for '%s'", i, tc.match, tc.expect, actual, tc.input)
 			continue
@@ -251,11 +264,6 @@ func TestPathMatcher(t *testing.T) {
 		{
 			match:  MatchPath{"/foo*"},
 			input:  "/FOOOO",
-			expect: true,
-		},
-		{
-			match:  MatchPath{"*.php"},
-			input:  "/foo/index.php. .",
 			expect: true,
 		},
 		{
@@ -404,6 +412,16 @@ func TestPathMatcher(t *testing.T) {
 			input:  "/foo%2fbar/baz",
 			expect: true,
 		},
+		{
+			match:  MatchPath{"/admin%2fpanel"},
+			input:  "/ADMIN%2fpanel",
+			expect: true,
+		},
+		{
+			match:  MatchPath{"/admin%2fpa*el"},
+			input:  "/ADMIN%2fPaAzZLm123NEL",
+			expect: true,
+		},
 	} {
 		err := tc.match.Provision(caddy.Context{})
 		if err == nil && tc.provisionErr {
@@ -425,7 +443,10 @@ func TestPathMatcher(t *testing.T) {
 		ctx := context.WithValue(req.Context(), caddy.ReplacerCtxKey, repl)
 		req = req.WithContext(ctx)
 
-		actual := tc.match.Match(req)
+		actual, err := tc.match.MatchWithError(req)
+		if err != nil {
+			t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+		}
 		if actual != tc.expect {
 			t.Errorf("Test %d %v: Expected %t, got %t for '%s'", i, tc.match, tc.expect, actual, tc.input)
 			continue
@@ -435,8 +456,10 @@ func TestPathMatcher(t *testing.T) {
 
 func TestPathMatcherWindows(t *testing.T) {
 	// only Windows has this bug where it will ignore
-	// trailing dots and spaces in a filename, but we
-	// test for it on all platforms to be more consistent
+	// trailing dots and spaces in a filename
+	if runtime.GOOS != "windows" {
+		return
+	}
 
 	req := &http.Request{URL: &url.URL{Path: "/index.php . . .."}}
 	repl := caddy.NewReplacer()
@@ -444,7 +467,10 @@ func TestPathMatcherWindows(t *testing.T) {
 	req = req.WithContext(ctx)
 
 	match := MatchPath{"*.php"}
-	matched := match.Match(req)
+	matched, err := match.MatchWithError(req)
+	if err != nil {
+		t.Errorf("Expected no error, but got: %v", err)
+	}
 	if !matched {
 		t.Errorf("Expected to match; should ignore trailing dots and spaces")
 	}
@@ -548,7 +574,10 @@ func TestPathREMatcher(t *testing.T) {
 		req = req.WithContext(ctx)
 		addHTTPVarsToReplacer(repl, req, httptest.NewRecorder())
 
-		actual := tc.match.Match(req)
+		actual, err := tc.match.MatchWithError(req)
+		if err != nil {
+			t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+		}
 		if actual != tc.expect {
 			t.Errorf("Test %d [%v]: Expected %t, got %t for input '%s'",
 				i, tc.match.Pattern, tc.expect, actual, tc.input)
@@ -684,7 +713,10 @@ func TestHeaderMatcher(t *testing.T) {
 		ctx := context.WithValue(req.Context(), caddy.ReplacerCtxKey, repl)
 		req = req.WithContext(ctx)
 
-		actual := tc.match.Match(req)
+		actual, err := tc.match.MatchWithError(req)
+		if err != nil {
+			t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+		}
 		if actual != tc.expect {
 			t.Errorf("Test %d %v: Expected %t, got %t for '%s'", i, tc.match, tc.expect, actual, tc.input)
 			continue
@@ -765,6 +797,42 @@ func TestQueryMatcher(t *testing.T) {
 			input:    "/?somekey=1",
 			expect:   true,
 		},
+		{
+			scenario: "do not match when not all query params are present",
+			match:    MatchQuery{"debug": []string{"1"}, "foo": []string{"bar"}},
+			input:    "/?debug=1",
+			expect:   false,
+		},
+		{
+			scenario: "match when all query params are present",
+			match:    MatchQuery{"debug": []string{"1"}, "foo": []string{"bar"}},
+			input:    "/?debug=1&foo=bar",
+			expect:   true,
+		},
+		{
+			scenario: "do not match when the value of a query param does not match",
+			match:    MatchQuery{"debug": []string{"1"}, "foo": []string{"bar"}},
+			input:    "/?debug=2&foo=bar",
+			expect:   false,
+		},
+		{
+			scenario: "do not match when all the values the query params do not match",
+			match:    MatchQuery{"debug": []string{"1"}, "foo": []string{"bar"}},
+			input:    "/?debug=2&foo=baz",
+			expect:   false,
+		},
+		{
+			scenario: "match against two values for the same key",
+			match:    MatchQuery{"debug": []string{"1"}},
+			input:    "/?debug=1&debug=2",
+			expect:   true,
+		},
+		{
+			scenario: "match against two values for the same key",
+			match:    MatchQuery{"debug": []string{"2", "1"}},
+			input:    "/?debug=2&debug=1",
+			expect:   true,
+		},
 	} {
 
 		u, _ := url.Parse(tc.input)
@@ -775,7 +843,10 @@ func TestQueryMatcher(t *testing.T) {
 		repl.Set("http.vars.debug", "1")
 		repl.Set("http.vars.key", "somekey")
 		req = req.WithContext(ctx)
-		actual := tc.match.Match(req)
+		actual, err := tc.match.MatchWithError(req)
+		if err != nil {
+			t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+		}
 		if actual != tc.expect {
 			t.Errorf("Test %d %v: Expected %t, got %t for '%s'", i, tc.match, tc.expect, actual, tc.input)
 			continue
@@ -844,7 +915,10 @@ func TestHeaderREMatcher(t *testing.T) {
 		req = req.WithContext(ctx)
 		addHTTPVarsToReplacer(repl, req, httptest.NewRecorder())
 
-		actual := tc.match.Match(req)
+		actual, err := tc.match.MatchWithError(req)
+		if err != nil {
+			t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+		}
 		if actual != tc.expect {
 			t.Errorf("Test %d [%v]: Expected %t, got %t for input '%s'",
 				i, tc.match, tc.expect, actual, tc.input)
@@ -864,7 +938,6 @@ func TestHeaderREMatcher(t *testing.T) {
 }
 
 func BenchmarkHeaderREMatcher(b *testing.B) {
-
 	i := 0
 	match := MatchHeaderRE{"Field": &MatchRegexp{Pattern: "^foo(.*)$", Name: "name"}}
 	input := http.Header{"Field": []string{"foobar"}}
@@ -884,8 +957,8 @@ func BenchmarkHeaderREMatcher(b *testing.B) {
 	ctx := context.WithValue(req.Context(), caddy.ReplacerCtxKey, repl)
 	req = req.WithContext(ctx)
 	addHTTPVarsToReplacer(repl, req, httptest.NewRecorder())
-	for run := 0; run < b.N; run++ {
-		match.Match(req)
+	for b.Loop() {
+		match.MatchWithError(req)
 	}
 }
 
@@ -894,6 +967,7 @@ func TestVarREMatcher(t *testing.T) {
 		desc       string
 		match      MatchVarsRE
 		input      VarsMiddleware
+		headers    http.Header
 		expect     bool
 		expectRepl map[string]string
 	}{
@@ -928,8 +1002,15 @@ func TestVarREMatcher(t *testing.T) {
 			input:  VarsMiddleware{"Var1": "var1Value"},
 			expect: true,
 		},
+		{
+			desc:       "placeholder key value containing braces is not double-expanded",
+			match:      MatchVarsRE{"{http.request.header.X-Input}": &MatchRegexp{Pattern: ".+", Name: "val"}},
+			input:      VarsMiddleware{},
+			headers:    http.Header{"X-Input": []string{"{env.HOME}"}},
+			expect:     true,
+			expectRepl: map[string]string{"val.0": "{env.HOME}"},
+		},
 	} {
-		tc := tc // capture range value
 		t.Run(tc.desc, func(t *testing.T) {
 			t.Parallel()
 			// compile the regexp and validate its name
@@ -945,7 +1026,7 @@ func TestVarREMatcher(t *testing.T) {
 			}
 
 			// set up the fake request and its Replacer
-			req := &http.Request{URL: new(url.URL), Method: http.MethodGet}
+			req := &http.Request{URL: new(url.URL), Method: http.MethodGet, Header: tc.headers}
 			repl := caddy.NewReplacer()
 			ctx := context.WithValue(req.Context(), caddy.ReplacerCtxKey, repl)
 			ctx = context.WithValue(ctx, VarsCtxKey, make(map[string]any))
@@ -955,7 +1036,10 @@ func TestVarREMatcher(t *testing.T) {
 
 			tc.input.ServeHTTP(httptest.NewRecorder(), req, emptyHandler)
 
-			actual := tc.match.Match(req)
+			actual, err := tc.match.MatchWithError(req)
+			if err != nil {
+				t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+			}
 			if actual != tc.expect {
 				t.Errorf("Test %d [%v]: Expected %t, got %t for input '%s'",
 					i, tc.match, tc.expect, actual, tc.input)
@@ -1080,13 +1164,17 @@ func TestNotMatcher(t *testing.T) {
 		ctx := context.WithValue(req.Context(), caddy.ReplacerCtxKey, repl)
 		req = req.WithContext(ctx)
 
-		actual := tc.match.Match(req)
+		actual, err := tc.match.MatchWithError(req)
+		if err != nil {
+			t.Errorf("Test %d %v: matching failed: %v", i, tc.match, err)
+		}
 		if actual != tc.expect {
 			t.Errorf("Test %d %+v: Expected %t, got %t for: host=%s path=%s'", i, tc.match, tc.expect, actual, tc.host, tc.path)
 			continue
 		}
 	}
 }
+
 func BenchmarkLargeHostMatcher(b *testing.B) {
 	// this benchmark simulates a large host matcher (thousands of entries) where each
 	// value is an exact hostname (not a placeholder or wildcard) - compare the results
@@ -1109,9 +1197,8 @@ func BenchmarkLargeHostMatcher(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		matcher.Match(req)
+	for b.Loop() {
+		matcher.MatchWithError(req)
 	}
 }
 
@@ -1123,9 +1210,8 @@ func BenchmarkHostMatcherWithoutPlaceholder(b *testing.B) {
 
 	match := MatchHost{"localhost"}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		match.Match(req)
+	for b.Loop() {
+		match.MatchWithError(req)
 	}
 }
 
@@ -1141,8 +1227,7 @@ func BenchmarkHostMatcherWithPlaceholder(b *testing.B) {
 	req = req.WithContext(ctx)
 	match := MatchHost{"{env.GO_BENCHMARK_DOMAIN}"}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		match.Match(req)
+	for b.Loop() {
+		match.MatchWithError(req)
 	}
 }

@@ -19,7 +19,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
@@ -39,9 +38,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
-	"github.com/google/uuid"
 )
 
 // NewTestReplacer creates a replacer for an http.Request
@@ -118,11 +119,46 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 				return port, true
 			case "http.request.hostport":
 				return req.Host, true
+			case "http.request.local":
+				localAddr, _ := req.Context().Value(http.LocalAddrContextKey).(net.Addr)
+				return localAddr.String(), true
+			case "http.request.local.host":
+				localAddr, _ := req.Context().Value(http.LocalAddrContextKey).(net.Addr)
+				host, _, err := net.SplitHostPort(localAddr.String())
+				if err != nil {
+					// localAddr is host:port for tcp and udp sockets and /unix/socket.path
+					// for unix sockets. net.SplitHostPort only operates on tcp and udp sockets,
+					// not unix sockets and will fail with the latter.
+					// We assume when net.SplitHostPort fails, localAddr is a unix socket and thus
+					// already "split" and save to return.
+					return localAddr, true
+				}
+				return host, true
+			case "http.request.local.port":
+				localAddr, _ := req.Context().Value(http.LocalAddrContextKey).(net.Addr)
+				_, port, _ := net.SplitHostPort(localAddr.String())
+				if portNum, err := strconv.Atoi(port); err == nil {
+					return portNum, true
+				}
+				return port, true
 			case "http.request.remote":
+				if req.TLS != nil && !req.TLS.HandshakeComplete {
+					// without a complete handshake (QUIC "early data") we can't trust the remote IP address to not be spoofed
+					return nil, true
+				}
 				return req.RemoteAddr, true
 			case "http.request.remote.host":
+				if req.TLS != nil && !req.TLS.HandshakeComplete {
+					// without a complete handshake (QUIC "early data") we can't trust the remote IP address to not be spoofed
+					return nil, true
+				}
 				host, _, err := net.SplitHostPort(req.RemoteAddr)
 				if err != nil {
+					// req.RemoteAddr is host:port for tcp and udp sockets and /unix/socket.path
+					// for unix sockets. net.SplitHostPort only operates on tcp and udp sockets,
+					// not unix sockets and will fail with the latter.
+					// We assume when net.SplitHostPort fails, req.RemoteAddr is a unix socket
+					// and thus already "split" and save to return.
 					return req.RemoteAddr, true
 				}
 				return host, true
@@ -136,8 +172,12 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 			// current URI, including any internal rewrites
 			case "http.request.uri":
 				return req.URL.RequestURI(), true
+			case "http.request.uri_escaped":
+				return url.QueryEscape(req.URL.RequestURI()), true
 			case "http.request.uri.path":
 				return req.URL.Path, true
+			case "http.request.uri.path_escaped":
+				return url.QueryEscape(req.URL.Path), true
 			case "http.request.uri.path.file":
 				_, file := path.Split(req.URL.Path)
 				return file, true
@@ -150,15 +190,30 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 				return path.Ext(req.URL.Path), true
 			case "http.request.uri.query":
 				return req.URL.RawQuery, true
+			case "http.request.uri.query_escaped":
+				return url.QueryEscape(req.URL.RawQuery), true
+			case "http.request.uri.prefixed_query":
+				if req.URL.RawQuery == "" {
+					return "", true
+				}
+				return "?" + req.URL.RawQuery, true
 			case "http.request.duration":
 				start := GetVar(req.Context(), "start_time").(time.Time)
 				return time.Since(start), true
 			case "http.request.duration_ms":
 				start := GetVar(req.Context(), "start_time").(time.Time)
 				return time.Since(start).Seconds() * 1e3, true // multiply seconds to preserve decimal (see #4666)
+
 			case "http.request.uuid":
+				// fetch the UUID for this request
 				id := GetVar(req.Context(), "uuid").(*requestID)
+
+				// set it to this request's access log
+				extra := req.Context().Value(ExtraLogFieldsCtxKey).(*ExtraLogFields)
+				extra.Set(zap.String("uuid", id.String()))
+
 				return id.String(), true
+
 			case "http.request.body":
 				if req.Body == nil {
 					return "", true
@@ -173,6 +228,21 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 				_, _ = io.Copy(buf, req.Body) // can't handle error, so just ignore it
 				req.Body = io.NopCloser(buf)  // replace real body with buffered data
 				return buf.String(), true
+
+			case "http.request.body_base64":
+				if req.Body == nil {
+					return "", true
+				}
+				// normally net/http will close the body for us, but since we
+				// are replacing it with a fake one, we have to ensure we close
+				// the real body ourselves when we're done
+				defer req.Body.Close()
+				// read the request body into a buffer (can't pool because we
+				// don't know its lifetime and would have to make a copy anyway)
+				buf := new(bytes.Buffer)
+				_, _ = io.Copy(buf, req.Body) // can't handle error, so just ignore it
+				req.Body = io.NopCloser(buf)  // replace real body with buffered data
+				return base64.StdEncoding.EncodeToString(buf.Bytes()), true
 
 			// original request, before any internal changes
 			case "http.request.orig_method":
@@ -195,6 +265,12 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 			case "http.request.orig_uri.query":
 				or, _ := req.Context().Value(OriginalRequestCtxKey).(http.Request)
 				return or.URL.RawQuery, true
+			case "http.request.orig_uri.prefixed_query":
+				or, _ := req.Context().Value(OriginalRequestCtxKey).(http.Request)
+				if or.URL.RawQuery == "" {
+					return "", true
+				}
+				return "?" + or.URL.RawQuery, true
 			}
 
 			// remote IP range/prefix (e.g. keep top 24 bits of 1.2.3.4  => "1.2.3.0/24")
@@ -228,7 +304,7 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 				return prefix.String(), true
 			}
 
-			// hostname labels
+			// hostname labels (case insensitive, so normalize to lowercase)
 			if strings.HasPrefix(key, reqHostLabelsReplPrefix) {
 				idxStr := key[len(reqHostLabelsReplPrefix):]
 				idx, err := strconv.Atoi(idxStr)
@@ -243,7 +319,7 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 				if idx >= len(hostLabels) {
 					return "", true
 				}
-				return hostLabels[len(hostLabels)-idx-1], true
+				return strings.ToLower(hostLabels[len(hostLabels)-idx-1]), true
 			}
 
 			// path parts
@@ -266,11 +342,31 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 				return pathParts[idx], true
 			}
 
+			// orig uri path parts
+			if strings.HasPrefix(key, reqOrigURIPathReplPrefix) {
+				idxStr := key[len(reqOrigURIPathReplPrefix):]
+				idx, err := strconv.Atoi(idxStr)
+				if err != nil {
+					return "", false
+				}
+				or, _ := req.Context().Value(OriginalRequestCtxKey).(http.Request)
+				pathParts := strings.Split(or.URL.Path, "/")
+				if len(pathParts) > 0 && pathParts[0] == "" {
+					pathParts = pathParts[1:]
+				}
+				if idx < 0 {
+					return "", false
+				}
+				if idx >= len(pathParts) {
+					return "", true
+				}
+				return pathParts[idx], true
+			}
+
 			// middleware variables
 			if strings.HasPrefix(key, varsReplPrefix) {
 				varName := key[len(varsReplPrefix):]
-				tbl := req.Context().Value(VarsCtxKey).(map[string]any)
-				raw := tbl[varName]
+				raw := GetVar(req.Context(), varName)
 				// variables can be dynamic, so always return true
 				// even when it may not be set; treat as empty then
 				return raw, true
@@ -288,13 +384,13 @@ func addHTTPVarsToReplacer(repl *caddy.Replacer, req *http.Request, w http.Respo
 			}
 		}
 
-		switch {
-		case key == "http.shutting_down":
+		switch key {
+		case "http.shutting_down":
 			server := req.Context().Value(ServerCtxKey).(*Server)
 			server.shutdownAtMu.RLock()
 			defer server.shutdownAtMu.RUnlock()
 			return !server.shutdownAt.IsZero(), true
-		case key == "http.time_until_shutdown":
+		case "http.time_until_shutdown":
 			server := req.Context().Value(ServerCtxKey).(*Server)
 			server.shutdownAtMu.RLock()
 			defer server.shutdownAtMu.RUnlock()
@@ -324,7 +420,16 @@ func getReqTLSReplacement(req *http.Request, key string) (any, bool) {
 	if strings.HasPrefix(field, "client.") {
 		cert := getTLSPeerCert(req.TLS)
 		if cert == nil {
-			return nil, false
+			// Instead of returning (nil, false) here, we set it to a dummy
+			// value to fix #7530. This way, even if there is no client cert,
+			// evaluating placeholders with ReplaceKnown() will still remove
+			// the placeholder, which would be expected. It is not expected
+			// for the placeholder to sometimes get removed based on whether
+			// the client presented a cert. We also do not return true here
+			// because we probably should remain accurate about whether a
+			// placeholder is, in fact, known or not.
+			// (This allocation may be slightly inefficient.)
+			cert = new(x509.Certificate)
 		}
 
 		// subject alternate names (SANs)
@@ -430,6 +535,8 @@ func getReqTLSReplacement(req *http.Request, key string) (any, bool) {
 		return true, true
 	case "server_name":
 		return req.TLS.ServerName, true
+	case "ech":
+		return req.TLS.ECHAccepted, true
 	}
 	return nil, false
 }
@@ -440,7 +547,11 @@ func marshalPublicKey(pubKey any) ([]byte, error) {
 	case *rsa.PublicKey:
 		return asn1.Marshal(key)
 	case *ecdsa.PublicKey:
-		return elliptic.Marshal(key.Curve, key.X, key.Y), nil
+		e, err := key.ECDH()
+		if err != nil {
+			return nil, err
+		}
+		return e.Bytes(), nil
 	case ed25519.PublicKey:
 		return key, nil
 	}
@@ -471,12 +582,13 @@ func (rid *requestID) String() string {
 }
 
 const (
-	reqCookieReplPrefix     = "http.request.cookie."
-	reqHeaderReplPrefix     = "http.request.header."
-	reqHostLabelsReplPrefix = "http.request.host.labels."
-	reqTLSReplPrefix        = "http.request.tls."
-	reqURIPathReplPrefix    = "http.request.uri.path."
-	reqURIQueryReplPrefix   = "http.request.uri.query."
-	respHeaderReplPrefix    = "http.response.header."
-	varsReplPrefix          = "http.vars."
+	reqCookieReplPrefix      = "http.request.cookie."
+	reqHeaderReplPrefix      = "http.request.header."
+	reqHostLabelsReplPrefix  = "http.request.host.labels."
+	reqTLSReplPrefix         = "http.request.tls."
+	reqURIPathReplPrefix     = "http.request.uri.path."
+	reqURIQueryReplPrefix    = "http.request.uri.query."
+	respHeaderReplPrefix     = "http.response.header."
+	varsReplPrefix           = "http.vars."
+	reqOrigURIPathReplPrefix = "http.request.orig_uri.path."
 )

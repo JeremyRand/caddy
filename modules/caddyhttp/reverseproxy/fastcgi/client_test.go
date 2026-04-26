@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/fcgi"
@@ -48,7 +48,7 @@ import (
 // and output "FAILED" in response
 const (
 	scriptFile = "/tank/www/fcgic_test.php"
-	//ipPort = "remote-php-serv:59000"
+	// ipPort = "remote-php-serv:59000"
 	ipPort = "127.0.0.1:59000"
 )
 
@@ -57,7 +57,6 @@ var globalt *testing.T
 type FastCGIServer struct{}
 
 func (s FastCGIServer) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
-
 	if err := req.ParseMultipartForm(100000000); err != nil {
 		log.Printf("[ERROR] failed to parse: %v", err)
 	}
@@ -84,7 +83,7 @@ func (s FastCGIServer) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		if req.MultipartForm != nil {
 			fileNum = len(req.MultipartForm.File)
 			for kn, fns := range req.MultipartForm.File {
-				//fmt.Fprintln(resp, "server:filekey ", kn )
+				// fmt.Fprintln(resp, "server:filekey ", kn )
 				length += len(kn)
 				for _, f := range fns {
 					fd, err := f.Open()
@@ -101,13 +100,13 @@ func (s FastCGIServer) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 					length += int(l0)
 					defer fd.Close()
 					md5 := fmt.Sprintf("%x", h.Sum(nil))
-					//fmt.Fprintln(resp, "server:filemd5 ", md5 )
+					// fmt.Fprintln(resp, "server:filemd5 ", md5 )
 
 					if kn != md5 {
 						fmt.Fprintln(resp, "server:err ", md5, kn)
 						stat = "FAILED"
 					}
-					//fmt.Fprintln(resp, "server:filename ", f.Filename )
+					// fmt.Fprintln(resp, "server:filename ", f.Filename )
 				}
 			}
 		}
@@ -121,7 +120,7 @@ func sendFcgi(reqType int, fcgiParams map[string]string, data []byte, posts map[
 	conn, err := net.Dial("tcp", ipPort)
 	if err != nil {
 		log.Println("err:", err)
-		return
+		return content
 	}
 
 	fcgi := client{rwc: conn, reqID: 1}
@@ -163,7 +162,7 @@ func sendFcgi(reqType int, fcgiParams map[string]string, data []byte, posts map[
 
 	if err != nil {
 		log.Println("err:", err)
-		return
+		return content
 	}
 
 	defer resp.Body.Close()
@@ -177,11 +176,10 @@ func sendFcgi(reqType int, fcgiParams map[string]string, data []byte, posts map[
 		globalt.Error("Server return failed message")
 	}
 
-	return
+	return content
 }
 
 func generateRandFile(size int) (p string, m string) {
-
 	p = filepath.Join(os.TempDir(), "fcgict"+strconv.Itoa(rand.Int()))
 
 	// open output file
@@ -199,7 +197,7 @@ func generateRandFile(size int) (p string, m string) {
 	h := md5.New()
 	for i := 0; i < size/16; i++ {
 		buf := make([]byte, 16)
-		binary.PutVarint(buf, rand.Int63())
+		binary.PutVarint(buf, rand.Int64())
 		if _, err := fo.Write(buf); err != nil {
 			log.Printf("[ERROR] failed to write buffer: %v\n", err)
 		}
@@ -208,14 +206,12 @@ func generateRandFile(size int) (p string, m string) {
 		}
 	}
 	m = fmt.Sprintf("%x", h.Sum(nil))
-	return
+	return p, m
 }
 
 func DisabledTest(t *testing.T) {
 	// TODO: test chunked reader
 	globalt = t
-
-	rand.Seed(time.Now().UTC().UnixNano())
 
 	// server
 	go func() {
@@ -236,7 +232,7 @@ func DisabledTest(t *testing.T) {
 	fcgiParams := make(map[string]string)
 	fcgiParams["REQUEST_METHOD"] = "GET"
 	fcgiParams["SERVER_PROTOCOL"] = "HTTP/1.1"
-	//fcgi_params["GATEWAY_INTERFACE"] = "CGI/1.1"
+	// fcgi_params["GATEWAY_INTERFACE"] = "CGI/1.1"
 	fcgiParams["SCRIPT_FILENAME"] = scriptFile
 
 	// simple GET

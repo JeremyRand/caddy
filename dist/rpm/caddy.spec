@@ -1,53 +1,46 @@
 %global debug_package %{nil}
 
-%global basever 2.6.1
-#global prerel rc
-#global prerelnum 3
-%global tag v%{basever}%{?prerel:-%{prerel}.%{prerelnum}}
-
 Name:           caddy
-# https://docs.fedoraproject.org/en-US/packaging-guidelines/Versioning/#_versioning_prereleases_with_tilde
-Version:        %{basever}%{?prerel:~%{prerel}%{prerelnum}}
+Version:        2.11.1
 Release:        1%{?dist}
 Summary:        Web server with automatic HTTPS
-License:        ASL 2.0
+License:        Apache-2.0
 URL:            https://caddyserver.com
 
 # In order to build Caddy with version information, we need to import it as a
 # go module.  To do that, we are going to forgo the traditional source tarball
 # and instead use just this file from upstream.  This method requires that we
 # allow networking in the build environment.
-Source0:        https://raw.githubusercontent.com/caddyserver/caddy/%{tag}/cmd/caddy/main.go
+Source0:        https://raw.githubusercontent.com/caddyserver/caddy/v%{version}/cmd/caddy/main.go
 # Use official resources for config, unit file, and welcome page.
 # https://github.com/caddyserver/dist
-Source1:        https://raw.githubusercontent.com/caddyserver/dist/master/config/Caddyfile
-Source2:        https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.service
-Source3:        https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy-api.service
-Source4:        https://raw.githubusercontent.com/caddyserver/dist/master/welcome/index.html
+Source10:       https://raw.githubusercontent.com/caddyserver/dist/master/config/Caddyfile
+Source20:       https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.service
+Source21:       https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy-api.service
+Source22:       https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.sysusers
+Source30:       https://raw.githubusercontent.com/caddyserver/dist/master/welcome/index.html
 # Since we are not using a traditional source tarball, we need to explicitly
 # pull in the license file.
-Source10:       https://raw.githubusercontent.com/caddyserver/caddy/%{tag}/LICENSE
+Source90:       https://raw.githubusercontent.com/caddyserver/caddy/v%{version}/LICENSE
 
-# https://github.com/caddyserver/caddy/commit/141872ed80d6323505e7543628c259fdae8506d3
-BuildRequires:  golang >= 1.18
 BuildRequires:  git-core
-%if 0%{?rhel} && 0%{?rhel} < 8
-BuildRequires:  systemd
-%else
 BuildRequires:  systemd-rpm-macros
-%endif
 %{?systemd_requires}
+
+# https://github.com/caddyserver/caddy/commit/05acc5131ed5c80acbd28ed8d907b166cd15b72c
+BuildRequires:  golang >= 1.25
+
 Provides:       webserver
 
 
 %description
-Caddy is the web server with automatic HTTPS.
+Caddy is an extensible server platform that uses TLS by default.
 
 
 %prep
 %setup -q -c -T
 # Copy main.go and LICENSE into the build directory.
-cp %{S:0} %{S:10} .
+cp %{S:0} %{S:90} .
 
 
 %build
@@ -62,13 +55,19 @@ cp %{S:0} %{S:10} .
 # https://fedoraproject.org/wiki/Changes/golang1.13#Detailed_Description
 export GOPROXY='https://proxy.golang.org,direct'
 
+# As of 2023-08-03, golang 1.21 in Fedora Rawhide requires this environment
+# variable to be set for the build to work correctly.
+# https://github.com/golang/go/issues/60145#issuecomment-1547921152
+export GOSUMDB='sum.golang.org'
+export BUILDTAGS='%{!?suse_version:rpm_crashtraceback }nobadger'
+
 go mod init caddy
-echo "require github.com/caddyserver/caddy/v2 %{tag}" >> go.mod
+echo "require github.com/caddyserver/caddy/v2 v%{version}" >> go.mod
 go mod tidy
 go build \
     -buildmode pie \
     -compiler gc \
-    %{!?suse_version: -tags="rpm_crashtraceback ${BUILDTAGS:-}"} \
+    -tags="${BUILDTAGS}" \
     -ldflags "${LDFLAGS:-} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')%{?__global_ldflags: -extldflags '%__global_ldflags'}" \
     -a -v -x
 
@@ -77,35 +76,40 @@ go build \
 # command
 install -D -p -m 0755 caddy %{buildroot}%{_bindir}/caddy
 
+# man pages
+./caddy manpage --directory %{buildroot}%{_mandir}/man8
+
 # config
-install -D -p -m 0644 %{S:1} %{buildroot}%{_sysconfdir}/caddy/Caddyfile
+install -D -p -m 0644 %{S:10} %{buildroot}%{_sysconfdir}/caddy/Caddyfile
 
 # systemd units
-install -D -p -m 0644 %{S:2} %{buildroot}%{_unitdir}/caddy.service
-install -D -p -m 0644 %{S:3} %{buildroot}%{_unitdir}/caddy-api.service
+install -D -p -m 0644 %{S:20} %{buildroot}%{_unitdir}/caddy.service
+install -D -p -m 0644 %{S:21} %{buildroot}%{_unitdir}/caddy-api.service
+
+# sysusers
+install -D -p -m 0644 %{S:22} %{buildroot}%{_sysusersdir}/caddy.conf
 
 # data directory
 install -d -m 0750 %{buildroot}%{_sharedstatedir}/caddy
 
 # welcome page
-install -D -p -m 0644 %{S:4} %{buildroot}%{_datadir}/caddy/index.html
+install -D -p -m 0644 %{S:30} %{buildroot}%{_datadir}/caddy/index.html
 
-# shell completion
+# shell completions
 install -d -m 0755 %{buildroot}%{_datadir}/bash-completion/completions
 ./caddy completion bash > %{buildroot}%{_datadir}/bash-completion/completions/caddy
 install -d -m 0755 %{buildroot}%{_datadir}/zsh/site-functions
-./caddy completion zsh  > %{buildroot}%{_datadir}/zsh/site-functions/_caddy
-
-# man pages
-./caddy manpage --directory %{buildroot}%{_mandir}/man8/
+./caddy completion zsh > %{buildroot}%{_datadir}/zsh/site-functions/_caddy
+install -d -m 0755 %{buildroot}%{_datadir}/fish/vendor_completions.d
+./caddy completion fish > %{buildroot}%{_datadir}/fish/vendor_completions.d/caddy.fish
 
 
 %pre
-getent group caddy &> /dev/null || \
-groupadd -r caddy &> /dev/null
-getent passwd caddy &> /dev/null || \
-useradd -r -g caddy -d %{_sharedstatedir}/caddy -s /sbin/nologin -c 'Caddy web server' caddy &> /dev/null
-exit 0
+%if 0%{?el7}
+%sysusers_create_compat %{S:22}
+%else
+%sysusers_create_package %{name} %{S:22}
+%endif
 
 
 %post
@@ -162,101 +166,14 @@ fi
 %files
 %license LICENSE
 %{_bindir}/caddy
+%{_mandir}/man8/caddy*.8*
 %{_datadir}/caddy
 %{_unitdir}/caddy.service
 %{_unitdir}/caddy-api.service
+%{_sysusersdir}/caddy.conf
 %dir %{_sysconfdir}/caddy
 %config(noreplace) %{_sysconfdir}/caddy/Caddyfile
 %attr(0750,caddy,caddy) %dir %{_sharedstatedir}/caddy
-# filesystem owns all the parent directories here
 %{_datadir}/bash-completion/completions/caddy
-# own parent directories in case zsh is not installed
-%dir %{_datadir}/zsh
-%dir %{_datadir}/zsh/site-functions
 %{_datadir}/zsh/site-functions/_caddy
-%{_mandir}/man8/caddy*.8*
-
-
-%changelog
-* Thu Sep 22 2022 Carl George <carl@george.computer> - 2.6.1-1
-- Latest upstream
-
-* Wed Sep 21 2022 Carl George <carl@george.computer> - 2.6.0-1
-- Latest upstream
-
-* Tue Aug 09 2022 Carl George <carl@george.computer> - 2.5.2-1
-- Latest upstream
-
-* Fri May 06 2022 Carl George <carl@george.computer> - 2.5.1-1
-- Latest upstream
-
-* Thu May 05 2022 Carl George <carl@george.computer> - 2.5.0-1
-- Latest upstream
-
-* Mon Nov 08 2021 Neal Gompa <ngompa13@gmail.com> - 2.4.6-1
-- Latest upstream
-
-* Tue Oct 26 2021 Carl George <carl@george.computer> - 2.4.5-1
-- Latest upstream
-
-* Thu Jun 17 2021 Carl George <carl@george.computer> - 2.4.3-1
-- Latest upstream
-
-* Sat Jun 12 2021 Carl George <carl@george.computer> - 2.4.2-1
-- Latest upstream
-
-* Fri May 21 2021 Carl George <carl@george.computer> - 2.4.1-1
-- Latest upstream
-
-* Tue May 11 2021 Carl George <carl@george.computer> - 2.4.0-1
-- Latest upstream
-
-* Mon Jan 18 2021 Carl George <carl@george.computer> - 2.3.0-1
-- Latest upstream
-
-* Fri Oct 30 2020 Carl George <carl@george.computer> - 2.2.1-1
-- Latest upstream
-
-* Sat Sep 26 2020 Carl George <carl@george.computer> - 2.2.0-1
-- Latest upstream
-
-* Sat Sep 19 2020 Carl George <carl@george.computer> - 2.2.0~rc3-1
-- Latest upstream
-
-* Wed Sep 09 2020 Neal Gompa <ngompa13@gmail.com> - 2.2.0~rc1-2
-- Fix systemd build dependency for RHEL/CentOS
-
-* Mon Aug 31 2020 Carl George <carl@george.computer> - 2.2.0~rc1-1
-- Latest upstream
-- Add bash and zsh completion support
-
-* Wed Jul 08 2020 Neal Gompa <ngompa13@gmail.com> - 2.1.1-1
-- Latest upstream
-
-* Tue May 26 2020 Neal Gompa <ngompa13@gmail.com> - 2.0.0-2
-- Adapt for SUSE distributions
-
-* Wed May 06 2020 Neal Gompa <ngompa13@gmail.com> - 2.0.0-1
-- Update to v2.0.0 final
-
-* Sat Apr 18 2020 Carl George <carl@george.computer> - 2.0.0~rc3-1
-- Latest upstream
-
-* Sun Feb 02 2020 Carl George <carl@george.computer> - 2.0.0~beta13-1
-- Latest upstream
-
-* Mon Jan 06 2020 Carl George <carl@george.computer> - 2.0.0~beta12-1
-- Update to beta12
-
-* Tue Nov 19 2019 Carl George <carl@george.computer> - 2.0.0~beta10-1
-- Update to beta10
-
-* Wed Nov 06 2019 Carl George <carl@george.computer> - 2.0.0~beta9-1
-- Update to beta9
-- Use upstream main.go file
-
-* Sun Nov 03 2019 Carl George <carl@george.computer> - 2.0.0~beta8-1
-- Update to beta8
-
-* Sat Oct 19 2019 Carl George <carl@george.computer> - 2.0.0~beta6-1
-- Initial Caddy v2 package
+%{_datadir}/fish/vendor_completions.d/caddy.fish

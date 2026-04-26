@@ -60,6 +60,16 @@ func TestRewrite(t *testing.T) {
 			expect: newRequest(t, "GET", "foo"),
 		},
 		{
+			rule:   Rewrite{URI: "{http.request.uri}"},
+			input:  newRequest(t, "GET", "/bar%3Fbaz?c=d"),
+			expect: newRequest(t, "GET", "/bar%3Fbaz?c=d"),
+		},
+		{
+			rule:   Rewrite{URI: "{http.request.uri.path}"},
+			input:  newRequest(t, "GET", "/bar%3Fbaz"),
+			expect: newRequest(t, "GET", "/bar%3Fbaz"),
+		},
+		{
 			rule:   Rewrite{URI: "/foo{http.request.uri.path}"},
 			input:  newRequest(t, "GET", "/bar"),
 			expect: newRequest(t, "GET", "/foo/bar"),
@@ -214,6 +224,11 @@ func TestRewrite(t *testing.T) {
 			input:  newRequest(t, "GET", "/foo#fragFirst?c=d"),
 			expect: newRequest(t, "GET", "/bar#fragFirst?c=d"),
 		},
+		{
+			rule:   Rewrite{URI: "/api/admin/panel"},
+			input:  newRequest(t, "GET", "/api/admin%2Fpanel"),
+			expect: newRequest(t, "GET", "/api/admin/panel"),
+		},
 
 		{
 			rule:   Rewrite{StripPathPrefix: "/prefix"},
@@ -222,6 +237,11 @@ func TestRewrite(t *testing.T) {
 		},
 		{
 			rule:   Rewrite{StripPathPrefix: "/prefix"},
+			input:  newRequest(t, "GET", "/prefix/foo/bar"),
+			expect: newRequest(t, "GET", "/foo/bar"),
+		},
+		{
+			rule:   Rewrite{StripPathPrefix: "prefix"},
 			input:  newRequest(t, "GET", "/prefix/foo/bar"),
 			expect: newRequest(t, "GET", "/foo/bar"),
 		},

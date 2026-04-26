@@ -17,10 +17,11 @@ package reverseproxy
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
+	"net/netip"
 	"strconv"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
@@ -47,15 +48,6 @@ type Upstream struct {
 	// backends is down. Also be aware of open proxy vulnerabilities.
 	Dial string `json:"dial,omitempty"`
 
-	// DEPRECATED: Use the SRVUpstreams module instead
-	// (http.reverse_proxy.upstreams.srv). This field will be
-	// removed in a future version of Caddy. TODO: Remove this field.
-	//
-	// If DNS SRV records are used for service discovery with this
-	// upstream, specify the DNS name for which to look up SRV
-	// records here, instead of specifying a dial address.
-	LookupSRV string `json:"lookup_srv,omitempty"`
-
 	// The maximum number of simultaneous requests to allow to
 	// this upstream. If set, overrides the global passive health
 	// check UnhealthyRequestCount value.
@@ -66,18 +58,17 @@ type Upstream struct {
 	// HeaderAffinity string
 	// IPAffinity     string
 
-	activeHealthCheckPort int
-	healthCheckPolicy     *PassiveHealthChecks
-	cb                    CircuitBreaker
-	unhealthy             int32 // accessed atomically; status from active health checker
+	activeHealthCheckPort     int
+	activeHealthCheckUpstream string
+	healthCheckPolicy         *PassiveHealthChecks
+	cb                        CircuitBreaker
+	unhealthy                 int32 // accessed atomically; status from active health checker
 }
 
-func (u Upstream) String() string {
-	if u.LookupSRV != "" {
-		return u.LookupSRV
-	}
-	return u.Dial
-}
+// (pointer receiver necessary to avoid a race condition, since
+// copying the Upstream reads the 'unhealthy' field which is
+// accessed atomically)
+func (u *Upstream) String() string { return u.Dial }
 
 // Available returns true if the remote host
 // is available to receive requests. This is
@@ -109,35 +100,20 @@ func (u *Upstream) Full() bool {
 }
 
 // fillDialInfo returns a filled DialInfo for upstream u, using the request
-// context. If the upstream has a SRV lookup configured, that is done and a
-// returned address is chosen; otherwise, the upstream's regular dial address
-// field is used. Note that the returned value is not a pointer.
-func (u *Upstream) fillDialInfo(r *http.Request) (DialInfo, error) {
-	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
+// context. Note that the returned value is not a pointer.
+func (u *Upstream) fillDialInfo(repl *caddy.Replacer) (DialInfo, error) {
 	var addr caddy.NetworkAddress
 
-	if u.LookupSRV != "" {
-		// perform DNS lookup for SRV records and choose one - TODO: deprecated
-		srvName := repl.ReplaceAll(u.LookupSRV, "")
-		_, records, err := net.DefaultResolver.LookupSRV(r.Context(), "", "", srvName)
-		if err != nil {
-			return DialInfo{}, err
-		}
-		addr.Network = "tcp"
-		addr.Host = records[0].Target
-		addr.StartPort, addr.EndPort = uint(records[0].Port), uint(records[0].Port)
-	} else {
-		// use provided dial address
-		var err error
-		dial := repl.ReplaceAll(u.Dial, "")
-		addr, err = caddy.ParseNetworkAddress(dial)
-		if err != nil {
-			return DialInfo{}, fmt.Errorf("upstream %s: invalid dial address %s: %v", u.Dial, dial, err)
-		}
-		if numPorts := addr.PortRangeSize(); numPorts != 1 {
-			return DialInfo{}, fmt.Errorf("upstream %s: dial address must represent precisely one socket: %s represents %d",
-				u.Dial, dial, numPorts)
-		}
+	// use provided dial address
+	var err error
+	dial := repl.ReplaceAll(u.Dial, "")
+	addr, err = caddy.ParseNetworkAddress(dial)
+	if err != nil {
+		return DialInfo{}, fmt.Errorf("upstream %s: invalid dial address %s: %v", u.Dial, dial, err)
+	}
+	if numPorts := addr.PortRangeSize(); numPorts != 1 {
+		return DialInfo{}, fmt.Errorf("upstream %s: dial address must represent precisely one socket: %s represents %d",
+			u.Dial, dial, numPorts)
 	}
 
 	return DialInfo{
@@ -158,11 +134,50 @@ func (u *Upstream) fillHost() {
 	u.Host = host
 }
 
+// fillDynamicHost is like fillHost, but stores the host in the separate
+// dynamicHosts map rather than the reference-counted UsagePool. Dynamic
+// hosts are not reference-counted; instead, they are retained as long as
+// they are actively seen and are evicted by a background cleanup goroutine
+// after dynamicHostIdleExpiry of inactivity. This preserves health state
+// (e.g. passive fail counts) across sequential requests.
+func (u *Upstream) fillDynamicHost() {
+	dynamicHostsMu.Lock()
+	entry, ok := dynamicHosts[u.String()]
+	if ok {
+		entry.lastSeen = time.Now()
+		dynamicHosts[u.String()] = entry
+		u.Host = entry.host
+	} else {
+		h := new(Host)
+		dynamicHosts[u.String()] = dynamicHostEntry{host: h, lastSeen: time.Now()}
+		u.Host = h
+	}
+	dynamicHostsMu.Unlock()
+
+	// ensure the cleanup goroutine is running
+	dynamicHostsCleanerOnce.Do(func() {
+		go func() {
+			for {
+				time.Sleep(dynamicHostCleanupInterval)
+				dynamicHostsMu.Lock()
+				for addr, entry := range dynamicHosts {
+					if time.Since(entry.lastSeen) > dynamicHostIdleExpiry {
+						delete(dynamicHosts, addr)
+					}
+				}
+				dynamicHostsMu.Unlock()
+			}
+		}()
+	})
+}
+
 // Host is the basic, in-memory representation of the state of a remote host.
 // Its fields are accessed atomically and Host values must not be copied.
 type Host struct {
-	numRequests int64 // must be 64-bit aligned on 32-bit systems (see https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	fails       int64
+	numRequests  int64 // must be 64-bit aligned on 32-bit systems (see https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	fails        int64
+	activePasses int64
+	activeFails  int64
 }
 
 // NumRequests returns the number of active requests to the upstream.
@@ -173,6 +188,16 @@ func (h *Host) NumRequests() int {
 // Fails returns the number of recent failures with the upstream.
 func (h *Host) Fails() int {
 	return int(atomic.LoadInt64(&h.fails))
+}
+
+// activeHealthPasses returns the number of consecutive active health check passes with the upstream.
+func (h *Host) activeHealthPasses() int {
+	return int(atomic.LoadInt64(&h.activePasses))
+}
+
+// activeHealthFails returns the number of consecutive active health check failures with the upstream.
+func (h *Host) activeHealthFails() int {
+	return int(atomic.LoadInt64(&h.activeFails))
 }
 
 // countRequest mutates the active request count by
@@ -193,6 +218,32 @@ func (h *Host) countFail(delta int) error {
 		return fmt.Errorf("count below 0: %d", result)
 	}
 	return nil
+}
+
+// countHealthPass mutates the recent passes count by
+// delta. It returns an error if the adjustment fails.
+func (h *Host) countHealthPass(delta int) error {
+	result := atomic.AddInt64(&h.activePasses, int64(delta))
+	if result < 0 {
+		return fmt.Errorf("count below 0: %d", result)
+	}
+	return nil
+}
+
+// countHealthFail mutates the recent failures count by
+// delta. It returns an error if the adjustment fails.
+func (h *Host) countHealthFail(delta int) error {
+	result := atomic.AddInt64(&h.activeFails, int64(delta))
+	if result < 0 {
+		return fmt.Errorf("count below 0: %d", result)
+	}
+	return nil
+}
+
+// resetHealth resets the health check counters.
+func (h *Host) resetHealth() {
+	atomic.StoreInt64(&h.activePasses, 0)
+	atomic.StoreInt64(&h.activeFails, 0)
 }
 
 // healthy returns true if the upstream is not actively marked as unhealthy.
@@ -256,6 +307,45 @@ func GetDialInfo(ctx context.Context) (DialInfo, bool) {
 // through config reloads.
 var hosts = caddy.NewUsagePool()
 
+// dynamicHosts tracks hosts that were provisioned from dynamic upstream
+// sources. Unlike static upstreams which are reference-counted via the
+// UsagePool, dynamic upstream hosts are not reference-counted. Instead,
+// their last-seen time is updated on each request, and a background
+// goroutine evicts entries that have been idle for dynamicHostIdleExpiry.
+// This preserves health state (e.g. passive fail counts) across requests
+// to the same dynamic backend.
+var (
+	dynamicHosts               = make(map[string]dynamicHostEntry)
+	dynamicHostsMu             sync.RWMutex
+	dynamicHostsCleanerOnce    sync.Once
+	dynamicHostCleanupInterval = 5 * time.Minute
+	dynamicHostIdleExpiry      = time.Hour
+)
+
+// dynamicHostEntry holds a Host and the last time it was seen
+// in a set of dynamic upstreams returned for a request.
+type dynamicHostEntry struct {
+	host     *Host
+	lastSeen time.Time
+}
+
 // dialInfoVarKey is the key used for the variable that holds
 // the dial info for the upstream connection.
 const dialInfoVarKey = "reverse_proxy.dial_info"
+
+// proxyProtocolInfoVarKey is the key used for the variable that holds
+// the proxy protocol info for the upstream connection.
+const proxyProtocolInfoVarKey = "reverse_proxy.proxy_protocol_info"
+
+// ProxyProtocolInfo contains information needed to write proxy protocol to a
+// connection to an upstream host.
+type ProxyProtocolInfo struct {
+	AddrPort netip.AddrPort
+}
+
+// tlsH1OnlyVarKey is the key used that indicates the connection will use h1 only for TLS.
+// https://github.com/caddyserver/caddy/issues/7292
+const tlsH1OnlyVarKey = "reverse_proxy.tls_h1_only"
+
+// proxyVarKey is the key used that indicates the proxy server used for a request.
+const proxyVarKey = "reverse_proxy.proxy"

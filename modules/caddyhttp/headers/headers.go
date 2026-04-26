@@ -78,7 +78,7 @@ func (h Handler) Validate() error {
 			return err
 		}
 	}
-	if h.Response != nil {
+	if h.Response != nil && h.Response.HeaderOps != nil {
 		err := h.Response.validate()
 		if err != nil {
 			return err
@@ -133,18 +133,44 @@ type HeaderOps struct {
 
 // Provision sets up the header operations.
 func (ops *HeaderOps) Provision(_ caddy.Context) error {
+	if ops == nil {
+		return nil // it's possible no ops are configured; fix #6893
+	}
 	for fieldName, replacements := range ops.Replace {
 		for i, r := range replacements {
-			if r.SearchRegexp != "" {
-				re, err := regexp.Compile(r.SearchRegexp)
-				if err != nil {
-					return fmt.Errorf("replacement %d for header field '%s': %v", i, fieldName, err)
-				}
-				replacements[i].re = re
+			if r.SearchRegexp == "" {
+				continue
 			}
+
+			// Check if it contains placeholders
+			if containsPlaceholders(r.SearchRegexp) {
+				// Contains placeholders, skips precompilation, and recompiles at runtime
+				continue
+			}
+
+			// Does not contain placeholders, safe to precompile
+			re, err := regexp.Compile(r.SearchRegexp)
+			if err != nil {
+				return fmt.Errorf("replacement %d for header field '%s': %v", i, fieldName, err)
+			}
+			replacements[i].re = re
 		}
 	}
 	return nil
+}
+
+// containsPlaceholders checks if the string contains Caddy placeholder syntax {key}
+func containsPlaceholders(s string) bool {
+	_, after, ok := strings.Cut(s, "{")
+	if !ok {
+		return false
+	}
+	closeIdx := strings.Index(after, "}")
+	if closeIdx == -1 {
+		return false
+	}
+	// Make sure there is content between the brackets
+	return closeIdx > 0
 }
 
 func (ops HeaderOps) validate() error {
@@ -184,14 +210,28 @@ type RespHeaderOps struct {
 	Require *caddyhttp.ResponseMatcher `json:"require,omitempty"`
 
 	// If true, header operations will be deferred until
-	// they are written out. Superceded if Require is set.
+	// they are written out. Superseded if Require is set.
 	// Usually you will need to set this to true if any
 	// fields are being deleted.
 	Deferred bool `json:"deferred,omitempty"`
 }
 
 // ApplyTo applies ops to hdr using repl.
-func (ops HeaderOps) ApplyTo(hdr http.Header, repl *caddy.Replacer) {
+func (ops *HeaderOps) ApplyTo(hdr http.Header, repl *caddy.Replacer) {
+	if ops == nil {
+		return
+	}
+	// before manipulating headers in other ways, check if there
+	// is configuration to delete all headers, and do that first
+	// because if a header is to be added, we don't want to delete
+	// it also
+	for _, fieldName := range ops.Delete {
+		fieldName = repl.ReplaceKnown(fieldName, "")
+		if fieldName == "*" {
+			clear(hdr)
+		}
+	}
+
 	// add
 	for fieldName, vals := range ops.Add {
 		fieldName = repl.ReplaceKnown(fieldName, "")
@@ -215,6 +255,9 @@ func (ops HeaderOps) ApplyTo(hdr http.Header, repl *caddy.Replacer) {
 	// delete
 	for _, fieldName := range ops.Delete {
 		fieldName = strings.ToLower(repl.ReplaceKnown(fieldName, ""))
+		if fieldName == "*" {
+			continue // handled above
+		}
 		switch {
 		case strings.HasPrefix(fieldName, "*") && strings.HasSuffix(fieldName, "*"):
 			for existingField := range hdr {
@@ -251,7 +294,15 @@ func (ops HeaderOps) ApplyTo(hdr http.Header, repl *caddy.Replacer) {
 				for fieldName, vals := range hdr {
 					for i := range vals {
 						if r.re != nil {
+							// Use precompiled regular expressions
 							hdr[fieldName][i] = r.re.ReplaceAllString(hdr[fieldName][i], replace)
+						} else if r.SearchRegexp != "" {
+							// Runtime compilation of regular expressions
+							searchRegexp := repl.ReplaceKnown(r.SearchRegexp, "")
+							if re, err := regexp.Compile(searchRegexp); err == nil {
+								hdr[fieldName][i] = re.ReplaceAllString(hdr[fieldName][i], replace)
+							}
+							// If compilation fails, skip this replacement
 						} else {
 							hdr[fieldName][i] = strings.ReplaceAll(hdr[fieldName][i], search, replace)
 						}
@@ -273,6 +324,11 @@ func (ops HeaderOps) ApplyTo(hdr http.Header, repl *caddy.Replacer) {
 				for i := range vals {
 					if r.re != nil {
 						hdr[hdrFieldName][i] = r.re.ReplaceAllString(hdr[hdrFieldName][i], replace)
+					} else if r.SearchRegexp != "" {
+						searchRegexp := repl.ReplaceKnown(r.SearchRegexp, "")
+						if re, err := regexp.Compile(searchRegexp); err == nil {
+							hdr[hdrFieldName][i] = re.ReplaceAllString(hdr[hdrFieldName][i], replace)
+						}
 					} else {
 						hdr[hdrFieldName][i] = strings.ReplaceAll(hdr[hdrFieldName][i], search, replace)
 					}
@@ -355,5 +411,5 @@ func (rww *responseWriterWrapper) Write(d []byte) (int, error) {
 var (
 	_ caddy.Provisioner           = (*Handler)(nil)
 	_ caddyhttp.MiddlewareHandler = (*Handler)(nil)
-	_ caddyhttp.HTTPInterfaces    = (*responseWriterWrapper)(nil)
+	_ http.ResponseWriter         = (*responseWriterWrapper)(nil)
 )

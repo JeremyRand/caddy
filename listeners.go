@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/netip"
 	"os"
@@ -27,12 +28,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
-	"time"
 
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
+	h3qlog "github.com/quic-go/quic-go/http3/qlog"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
+
+	"github.com/caddyserver/caddy/v2/internal"
 )
 
 // NetworkAddress represents one or more network addresses.
@@ -55,11 +58,9 @@ type NetworkAddress struct {
 	EndPort   uint
 }
 
-// ListenAll calls Listen() for all addresses represented by this struct, i.e. all ports in the range.
+// ListenAll calls Listen for all addresses represented by this struct, i.e. all ports in the range.
 // (If the address doesn't use ports or has 1 port only, then only 1 listener will be created.)
 // It returns an error if any listener failed to bind, and closes any listeners opened up to that point.
-//
-// TODO: Experimental API: subject to change or removal.
 func (na NetworkAddress) ListenAll(ctx context.Context, config net.ListenConfig) ([]any, error) {
 	var listeners []any
 	var err error
@@ -105,7 +106,8 @@ func (na NetworkAddress) ListenAll(ctx context.Context, config net.ListenConfig)
 // portOffset to the start port. (For network types that do not use ports, the
 // portOffset is ignored.)
 //
-// The provided ListenConfig is used to create the listener. Its Control function,
+// First Listen checks if a plugin can provide a listener from this address. Otherwise,
+// the provided ListenConfig is used to create the listener. Its Control function,
 // if set, may be wrapped by an internally-used Control function. The provided
 // context may be used to cancel long operations early. The context is not used
 // to close the listener after it has been created.
@@ -128,8 +130,8 @@ func (na NetworkAddress) ListenAll(ctx context.Context, config net.ListenConfig)
 // Unix sockets will be unlinked before being created, to ensure we can bind to
 // it even if the previous program using it exited uncleanly; it will also be
 // unlinked upon a graceful exit (or when a new config does not use that socket).
-//
-// TODO: Experimental API: subject to change or removal.
+// Listen synchronizes binds to unix domain sockets to avoid race conditions
+// while an existing socket is unlinked.
 func (na NetworkAddress) Listen(ctx context.Context, portOffset uint, config net.ListenConfig) (any, error) {
 	if na.IsUnixNetwork() {
 		unixSocketsMu.Lock()
@@ -137,7 +139,7 @@ func (na NetworkAddress) Listen(ctx context.Context, portOffset uint, config net
 	}
 
 	// check to see if plugin provides listener
-	if ln, err := getListenerFromPlugin(ctx, na.Network, na.JoinHostPort(portOffset), config); ln != nil || err != nil {
+	if ln, err := getListenerFromPlugin(ctx, na.Network, na.Host, na.port(), portOffset, config); ln != nil || err != nil {
 		return ln, err
 	}
 
@@ -146,57 +148,57 @@ func (na NetworkAddress) Listen(ctx context.Context, portOffset uint, config net
 }
 
 func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net.ListenConfig) (any, error) {
-	var ln any
-	var err error
+	var (
+		ln           any
+		err          error
+		address      string
+		unixFileMode fs.FileMode
+	)
 
-	address := na.JoinHostPort(portOffset)
-
-	// if this is a unix socket, see if we already have it open
-	if socket, err := reuseUnixSocket(na.Network, address); socket != nil || err != nil {
-		return socket, err
-	}
-
-	lnKey := listenerKey(na.Network, address)
-
-	switch na.Network {
-	case "tcp", "tcp4", "tcp6", "unix", "unixpacket":
-		ln, err = listenTCPOrUnix(ctx, lnKey, na.Network, address, config)
-	case "unixgram":
-		ln, err = config.ListenPacket(ctx, na.Network, address)
-	case "udp", "udp4", "udp6":
-		sharedPc, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
-			pc, err := config.ListenPacket(ctx, na.Network, address)
-			if err != nil {
-				return nil, err
-			}
-			return &sharedPacketConn{PacketConn: pc, key: lnKey}, nil
-		})
+	// split unix socket addr early so lnKey
+	// is independent of permissions bits
+	if na.IsUnixNetwork() {
+		address, unixFileMode, err = internal.SplitUnixSocketPermissionsBits(na.Host)
 		if err != nil {
 			return nil, err
 		}
-		ln = &fakeClosePacketConn{sharedPacketConn: sharedPc.(*sharedPacketConn)}
+	} else if na.IsFdNetwork() {
+		address = na.Host
+	} else {
+		address = na.JoinHostPort(portOffset)
 	}
+
 	if strings.HasPrefix(na.Network, "ip") {
 		ln, err = config.ListenPacket(ctx, na.Network, address)
+	} else {
+		if na.IsUnixNetwork() {
+			// if this is a unix socket, see if we already have it open
+			ln, err = reuseUnixSocket(na.Network, address)
+		}
+
+		if ln == nil && err == nil {
+			// otherwise, create a new listener
+			lnKey := listenerKey(na.Network, address)
+			ln, err = listenReusable(ctx, lnKey, na.Network, address, config)
+		}
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	if ln == nil {
 		return nil, fmt.Errorf("unsupported network type: %s", na.Network)
 	}
 
-	// if new listener is a unix socket, make sure we can reuse it later
-	// (we do our own "unlink on close" -- not required, but more tidy)
-	one := int32(1)
-	switch unix := ln.(type) {
-	case *net.UnixListener:
-		unix.SetUnlinkOnClose(false)
-		ln = &unixListener{unix, lnKey, &one}
-		unixSockets[lnKey] = ln.(*unixListener)
-	case *net.UnixConn:
-		ln = &unixConn{unix, address, lnKey, &one}
-		unixSockets[lnKey] = ln.(*unixConn)
+	if IsUnixNetwork(na.Network) {
+		isAbstractUnixSocket := strings.HasPrefix(address, "@")
+		if !isAbstractUnixSocket {
+			err = os.Chmod(address, unixFileMode)
+			if err != nil {
+				return nil, fmt.Errorf("unable to set permissions (%s) on %s: %v", unixFileMode, address, err)
+			}
+		}
 	}
 
 	return ln, nil
@@ -205,25 +207,29 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 // IsUnixNetwork returns true if na.Network is
 // unix, unixgram, or unixpacket.
 func (na NetworkAddress) IsUnixNetwork() bool {
-	return isUnixNetwork(na.Network)
+	return IsUnixNetwork(na.Network)
+}
+
+// IsFdNetwork returns true if na.Network is
+// fd or fdgram.
+func (na NetworkAddress) IsFdNetwork() bool {
+	return IsFdNetwork(na.Network)
 }
 
 // JoinHostPort is like net.JoinHostPort, but where the port
 // is StartPort + offset.
 func (na NetworkAddress) JoinHostPort(offset uint) string {
-	if na.IsUnixNetwork() {
+	if na.IsUnixNetwork() || na.IsFdNetwork() {
 		return na.Host
 	}
-	return net.JoinHostPort(na.Host, strconv.Itoa(int(na.StartPort+offset)))
+	return net.JoinHostPort(na.Host, strconv.FormatUint(uint64(na.StartPort+offset), 10))
 }
 
 // Expand returns one NetworkAddress for each port in the port range.
-//
-// This is EXPERIMENTAL and subject to change or removal.
 func (na NetworkAddress) Expand() []NetworkAddress {
 	size := na.PortRangeSize()
 	addrs := make([]NetworkAddress, size)
-	for portOffset := uint(0); portOffset < size; portOffset++ {
+	for portOffset := range size {
 		addrs[portOffset] = na.At(portOffset)
 	}
 	return addrs
@@ -250,7 +256,7 @@ func (na NetworkAddress) PortRangeSize() uint {
 }
 
 func (na NetworkAddress) isLoopback() bool {
-	if na.IsUnixNetwork() {
+	if na.IsUnixNetwork() || na.IsFdNetwork() {
 		return true
 	}
 	if na.Host == "localhost" {
@@ -289,8 +295,14 @@ func (na NetworkAddress) String() string {
 	return JoinNetworkAddress(na.Network, na.Host, na.port())
 }
 
-func isUnixNetwork(netw string) bool {
-	return netw == "unix" || netw == "unixgram" || netw == "unixpacket"
+// IsUnixNetwork returns true if the netw is a unix network.
+func IsUnixNetwork(netw string) bool {
+	return strings.HasPrefix(netw, "unix")
+}
+
+// IsFdNetwork returns true if the netw is a fd network.
+func IsFdNetwork(netw string) bool {
+	return strings.HasPrefix(netw, "fd")
 }
 
 // ParseNetworkAddress parses addr into its individual
@@ -302,22 +314,38 @@ func isUnixNetwork(netw string) bool {
 // Network addresses are distinct from URLs and do not
 // use URL syntax.
 func ParseNetworkAddress(addr string) (NetworkAddress, error) {
+	return ParseNetworkAddressWithDefaults(addr, "tcp", 0)
+}
+
+// ParseNetworkAddressWithDefaults is like ParseNetworkAddress but allows
+// the default network and port to be specified.
+func ParseNetworkAddressWithDefaults(addr, defaultNetwork string, defaultPort uint) (NetworkAddress, error) {
 	var host, port string
 	network, host, port, err := SplitNetworkAddress(addr)
 	if err != nil {
 		return NetworkAddress{}, err
 	}
 	if network == "" {
-		network = "tcp"
+		network = defaultNetwork
 	}
-	if isUnixNetwork(network) {
+	if IsUnixNetwork(network) {
+		_, _, err := internal.SplitUnixSocketPermissionsBits(host)
+		return NetworkAddress{
+			Network: network,
+			Host:    host,
+		}, err
+	}
+	if IsFdNetwork(network) {
 		return NetworkAddress{
 			Network: network,
 			Host:    host,
 		}, nil
 	}
 	var start, end uint64
-	if port != "" {
+	if port == "" {
+		start = uint64(defaultPort)
+		end = uint64(defaultPort)
+	} else {
 		before, after, found := strings.Cut(port, "-")
 		if !found {
 			after = before
@@ -352,26 +380,29 @@ func SplitNetworkAddress(a string) (network, host, port string, err error) {
 	if slashFound {
 		network = strings.ToLower(strings.TrimSpace(beforeSlash))
 		a = afterSlash
+		if IsUnixNetwork(network) || IsFdNetwork(network) {
+			host = a
+			return network, host, port, err
+		}
 	}
-	if isUnixNetwork(network) {
-		host = a
-		return
-	}
+
 	host, port, err = net.SplitHostPort(a)
-	if err == nil || a == "" {
-		return
-	}
-	// in general, if there was an error, it was likely "missing port",
-	// so try adding a bogus port to take advantage of standard library's
-	// robust parser, then strip the artificial port before returning
-	// (don't overwrite original error though; might still be relevant)
-	var err2 error
-	host, port, err2 = net.SplitHostPort(a + ":0")
-	if err2 == nil {
-		err = nil
+	firstErr := err
+
+	if err != nil {
+		// in general, if there was an error, it was likely "missing port",
+		// so try removing square brackets around an IPv6 host, adding a bogus
+		// port to take advantage of standard library's robust parser, then
+		// strip the artificial port.
+		host, _, err = net.SplitHostPort(net.JoinHostPort(strings.Trim(a, "[]"), "0"))
 		port = ""
 	}
-	return
+
+	if err != nil {
+		err = errors.Join(firstErr, err)
+	}
+
+	return network, host, port, err
 }
 
 // JoinNetworkAddress combines network, host, and port into a single
@@ -384,7 +415,7 @@ func JoinNetworkAddress(network, host, port string) string {
 	if network != "" {
 		a = network + "/"
 	}
-	if (host != "" && port == "") || isUnixNetwork(network) {
+	if (host != "" && port == "") || IsUnixNetwork(network) || IsFdNetwork(network) {
 		a += host
 	} else if port != "" {
 		a += net.JoinHostPort(host, port)
@@ -392,86 +423,81 @@ func JoinNetworkAddress(network, host, port string) string {
 	return a
 }
 
-// DEPRECATED: Use NetworkAddress.Listen instead. This function will likely be changed or removed in the future.
-func Listen(network, addr string) (net.Listener, error) {
-	// a 0 timeout means Go uses its default
-	return ListenTimeout(network, addr, 0)
-}
-
-// DEPRECATED: Use NetworkAddress.Listen instead. This function will likely be changed or removed in the future.
-func ListenTimeout(network, addr string, keepalivePeriod time.Duration) (net.Listener, error) {
-	netAddr, err := ParseNetworkAddress(JoinNetworkAddress(network, addr, ""))
-	if err != nil {
-		return nil, err
-	}
-
-	ln, err := netAddr.Listen(context.TODO(), 0, net.ListenConfig{KeepAlive: keepalivePeriod})
-	if err != nil {
-		return nil, err
-	}
-
-	return ln.(net.Listener), nil
-}
-
-// DEPRECATED: Use NetworkAddress.Listen instead. This function will likely be changed or removed in the future.
-func ListenPacket(network, addr string) (net.PacketConn, error) {
-	netAddr, err := ParseNetworkAddress(JoinNetworkAddress(network, addr, ""))
-	if err != nil {
-		return nil, err
-	}
-
-	ln, err := netAddr.Listen(context.TODO(), 0, net.ListenConfig{})
-	if err != nil {
-		return nil, err
-	}
-
-	return ln.(net.PacketConn), nil
-}
-
-// ListenQUIC returns a quic.EarlyListener suitable for use in a Caddy module.
-// The network will be transformed into a QUIC-compatible type (if unix, then
-// unixgram will be used; otherwise, udp will be used).
+// ListenQUIC returns a http3.QUICEarlyListener suitable for use in a Caddy module.
+//
+// The network will be transformed into a QUIC-compatible type if the same address can be used with
+// different networks. Currently this just means that for tcp, udp will be used with the same
+// address instead.
 //
 // NOTE: This API is EXPERIMENTAL and may be changed or removed.
-//
-// TODO: See if we can find a more elegant solution closer to the new NetworkAddress.Listen API.
-func ListenQUIC(ln net.PacketConn, tlsConf *tls.Config, activeRequests *int64) (quic.EarlyListener, error) {
-	lnKey := listenerKey("quic+"+ln.LocalAddr().Network(), ln.LocalAddr().String())
+// NOTE: user should close the returned listener twice, once to stop accepting new connections, the second time to free up the packet conn.
+func (na NetworkAddress) ListenQUIC(ctx context.Context, portOffset uint, config net.ListenConfig, tlsConf *tls.Config, pcWrappers []PacketConnWrapper, allow0rttconf *bool) (http3.QUICListener, error) {
+	lnKey := listenerKey("quic"+na.Network, na.JoinHostPort(portOffset))
 
 	sharedEarlyListener, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
-		earlyLn, err := quic.ListenEarly(ln, http3.ConfigureTLSConfig(tlsConf), &quic.Config{
-			RequireAddressValidation: func(clientAddr net.Addr) bool {
-				var highLoad bool
-				if activeRequests != nil {
-					highLoad = atomic.LoadInt64(activeRequests) > 1000 // TODO: make tunable?
-				}
-				return highLoad
-			},
-		})
+		lnAny, err := na.Listen(ctx, portOffset, config)
 		if err != nil {
 			return nil, err
 		}
-		return &sharedQuicListener{EarlyListener: earlyLn, key: lnKey}, nil
+
+		ln := lnAny.(net.PacketConn)
+
+		h3ln := ln
+		if len(pcWrappers) == 0 {
+			for {
+				// retrieve the underlying socket, so quic-go can optimize.
+				if unwrapper, ok := h3ln.(interface{ Unwrap() net.PacketConn }); ok {
+					h3ln = unwrapper.Unwrap()
+				} else {
+					break
+				}
+			}
+		} else {
+			// wrap packet conn before QUIC
+			for _, pcWrapper := range pcWrappers {
+				h3ln = pcWrapper.WrapPacketConn(h3ln)
+			}
+		}
+
+		sqs := newSharedQUICState(tlsConf)
+		// http3.ConfigureTLSConfig only uses this field and tls App sets this field as well
+		//nolint:gosec
+		quicTlsConfig := &tls.Config{GetConfigForClient: sqs.getConfigForClient}
+		// Require clients to verify their source address when we're handling more than 1000 handshakes per second.
+		// TODO: make tunable?
+		limiter := rate.NewLimiter(1000, 1000)
+		tr := &quic.Transport{
+			Conn:                h3ln,
+			VerifySourceAddress: func(addr net.Addr) bool { return !limiter.Allow() },
+		}
+		allow0rtt := true
+		if allow0rttconf != nil {
+			allow0rtt = *allow0rttconf
+		}
+		earlyLn, err := tr.ListenEarly(
+			http3.ConfigureTLSConfig(quicTlsConfig),
+			&quic.Config{
+				Allow0RTT: allow0rtt,
+				Tracer:    h3qlog.DefaultConnectionTracer,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		// TODO: figure out when to close the listener and the transport
+		// using the original net.PacketConn to close them properly
+		return &sharedQuicListener{EarlyListener: earlyLn, packetConn: ln, sqs: sqs, key: lnKey}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: to serve QUIC over a unix socket, currently we need to hold onto
-	// the underlying net.PacketConn (which we wrap as unixConn to keep count
-	// of closes) because closing the quic.EarlyListener doesn't actually close
-	// the underlying PacketConn, but we need to for unix sockets since we dup
-	// the file descriptor and thus need to close the original; track issue:
-	// https://github.com/lucas-clemente/quic-go/issues/3560#issuecomment-1258959608
-	var unix *unixConn
-	if uc, ok := ln.(*unixConn); ok {
-		unix = uc
-	}
+	sql := sharedEarlyListener.(*sharedQuicListener)
+	// add current tls.Config to sqs, so GetConfigForClient will always return the latest tls.Config in case of context cancellation
+	ctx, cancel := sql.sqs.addState(tlsConf)
 
-	ctx, cancel := context.WithCancel(context.Background())
 	return &fakeCloseQuicListener{
-		sharedQuicListener: sharedEarlyListener.(*sharedQuicListener),
-		uc:                 unix,
+		sharedQuicListener: sql,
 		context:            ctx,
 		contextCancel:      cancel,
 	}, nil
@@ -483,26 +509,86 @@ func ListenerUsage(network, addr string) int {
 	return count
 }
 
+// contextAndCancelFunc groups context and its cancelFunc
+type contextAndCancelFunc struct {
+	context.Context
+	context.CancelCauseFunc
+}
+
+// sharedQUICState manages GetConfigForClient
+// see issue: https://github.com/caddyserver/caddy/pull/4849
+type sharedQUICState struct {
+	rmu           sync.RWMutex
+	tlsConfs      map[*tls.Config]contextAndCancelFunc
+	activeTlsConf *tls.Config
+}
+
+// newSharedQUICState creates a new sharedQUICState
+func newSharedQUICState(tlsConfig *tls.Config) *sharedQUICState {
+	sqtc := &sharedQUICState{
+		tlsConfs:      make(map[*tls.Config]contextAndCancelFunc),
+		activeTlsConf: tlsConfig,
+	}
+	sqtc.addState(tlsConfig)
+	return sqtc
+}
+
+// getConfigForClient is used as tls.Config's GetConfigForClient field
+func (sqs *sharedQUICState) getConfigForClient(ch *tls.ClientHelloInfo) (*tls.Config, error) {
+	sqs.rmu.RLock()
+	defer sqs.rmu.RUnlock()
+	return sqs.activeTlsConf.GetConfigForClient(ch)
+}
+
+// addState adds tls.Config and activeRequests to the map if not present and returns the corresponding context and its cancelFunc
+// so that when cancelled, the active tls.Config will change
+func (sqs *sharedQUICState) addState(tlsConfig *tls.Config) (context.Context, context.CancelCauseFunc) {
+	sqs.rmu.Lock()
+	defer sqs.rmu.Unlock()
+
+	if cacc, ok := sqs.tlsConfs[tlsConfig]; ok {
+		return cacc.Context, cacc.CancelCauseFunc
+	}
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	wrappedCancel := func(cause error) {
+		cancel(cause)
+
+		sqs.rmu.Lock()
+		defer sqs.rmu.Unlock()
+
+		delete(sqs.tlsConfs, tlsConfig)
+		if sqs.activeTlsConf == tlsConfig {
+			// select another tls.Config, if there is none,
+			// related sharedQuicListener will be destroyed anyway
+			for tc := range sqs.tlsConfs {
+				sqs.activeTlsConf = tc
+				break
+			}
+		}
+	}
+	sqs.tlsConfs[tlsConfig] = contextAndCancelFunc{ctx, wrappedCancel}
+	// there should be at most 2 tls.Configs
+	if len(sqs.tlsConfs) > 2 {
+		Log().Warn("quic listener tls configs are more than 2", zap.Int("number of configs", len(sqs.tlsConfs)))
+	}
+	return ctx, wrappedCancel
+}
+
 // sharedQuicListener is like sharedListener, but for quic.EarlyListeners.
 type sharedQuicListener struct {
-	quic.EarlyListener
-	key string
+	*quic.EarlyListener
+	packetConn net.PacketConn // we have to hold these because quic-go won't close listeners it didn't create
+	sqs        *sharedQUICState
+	key        string
 }
 
-// Destruct closes the underlying QUIC listener.
+// Destruct closes the underlying QUIC listener and its associated net.PacketConn.
 func (sql *sharedQuicListener) Destruct() error {
-	return sql.EarlyListener.Close()
-}
-
-// sharedPacketConn is like sharedListener, but for net.PacketConns.
-type sharedPacketConn struct {
-	net.PacketConn
-	key string
-}
-
-// Destruct closes the underlying socket.
-func (spc *sharedPacketConn) Destruct() error {
-	return spc.PacketConn.Close()
+	// close EarlyListener first to stop any operations being done to the net.PacketConn
+	_ = sql.EarlyListener.Close()
+	// then close the net.PacketConn
+	return sql.packetConn.Close()
 }
 
 // fakeClosedErr returns an error value that is not temporary
@@ -522,45 +608,13 @@ func fakeClosedErr(l interface{ Addr() net.Addr }) error {
 // indicating that it is pretending to be closed so that the
 // server using it can terminate, while the underlying
 // socket is actually left open.
-var errFakeClosed = fmt.Errorf("listener 'closed' 😉")
-
-// fakeClosePacketConn is like fakeCloseListener, but for PacketConns.
-type fakeClosePacketConn struct {
-	closed            int32 // accessed atomically; belongs to this struct only
-	*sharedPacketConn       // embedded, so we also become a net.PacketConn
-}
-
-func (fcpc *fakeClosePacketConn) Close() error {
-	if atomic.CompareAndSwapInt32(&fcpc.closed, 0, 1) {
-		_, _ = listenerPool.Delete(fcpc.sharedPacketConn.key)
-	}
-	return nil
-}
-
-// Supports QUIC implementation: https://github.com/caddyserver/caddy/issues/3998
-func (fcpc fakeClosePacketConn) SetReadBuffer(bytes int) error {
-	if conn, ok := fcpc.PacketConn.(interface{ SetReadBuffer(int) error }); ok {
-		return conn.SetReadBuffer(bytes)
-	}
-	return fmt.Errorf("SetReadBuffer() not implemented for %T", fcpc.PacketConn)
-}
-
-// Supports QUIC implementation: https://github.com/caddyserver/caddy/issues/3998
-func (fcpc fakeClosePacketConn) SyscallConn() (syscall.RawConn, error) {
-	if conn, ok := fcpc.PacketConn.(interface {
-		SyscallConn() (syscall.RawConn, error)
-	}); ok {
-		return conn.SyscallConn()
-	}
-	return nil, fmt.Errorf("SyscallConn() not implemented for %T", fcpc.PacketConn)
-}
+var errFakeClosed = fmt.Errorf("QUIC listener 'closed' 😉")
 
 type fakeCloseQuicListener struct {
-	closed              int32     // accessed atomically; belongs to this struct only
-	*sharedQuicListener           // embedded, so we also become a quic.EarlyListener
-	uc                  *unixConn // underlying unix socket, if UDS
+	closed              int32 // accessed atomically; belongs to this struct only
+	*sharedQuicListener       // embedded, so we also become a quic.EarlyListener
 	context             context.Context
-	contextCancel       context.CancelFunc
+	contextCancel       context.CancelCauseFunc
 }
 
 // Currently Accept ignores the passed context, however a situation where
@@ -568,7 +622,7 @@ type fakeCloseQuicListener struct {
 // server on which Accept would be called with non-empty contexts
 // (mind that the default net listeners' Accept doesn't take a context argument)
 // sounds way too rare for us to sacrifice efficiency here.
-func (fcql *fakeCloseQuicListener) Accept(_ context.Context) (quic.EarlyConnection, error) {
+func (fcql *fakeCloseQuicListener) Accept(_ context.Context) (*quic.Conn, error) {
 	conn, err := fcql.sharedQuicListener.Accept(fcql.context)
 	if err == nil {
 		return conn, nil
@@ -583,13 +637,9 @@ func (fcql *fakeCloseQuicListener) Accept(_ context.Context) (quic.EarlyConnecti
 
 func (fcql *fakeCloseQuicListener) Close() error {
 	if atomic.CompareAndSwapInt32(&fcql.closed, 0, 1) {
-		fcql.contextCancel()
+		fcql.contextCancel(errFakeClosed)
+	} else if atomic.CompareAndSwapInt32(&fcql.closed, 1, 2) {
 		_, _ = listenerPool.Delete(fcql.sharedQuicListener.key)
-		if fcql.uc != nil {
-			// unix sockets need to be closed ourselves because we dup() the file
-			// descriptor when we reuse them, so this avoids a resource leak
-			fcql.uc.Close()
-		}
 	}
 	return nil
 }
@@ -604,7 +654,8 @@ func RegisterNetwork(network string, getListener ListenerFunc) {
 	if network == "tcp" || network == "tcp4" || network == "tcp6" ||
 		network == "udp" || network == "udp4" || network == "udp6" ||
 		network == "unix" || network == "unixpacket" || network == "unixgram" ||
-		strings.HasPrefix("ip:", network) || strings.HasPrefix("ip4:", network) || strings.HasPrefix("ip6:", network) {
+		strings.HasPrefix(network, "ip:") || strings.HasPrefix(network, "ip4:") || strings.HasPrefix(network, "ip6:") ||
+		network == "fd" || network == "fdgram" {
 		panic("network type " + network + " is reserved")
 	}
 
@@ -615,63 +666,16 @@ func RegisterNetwork(network string, getListener ListenerFunc) {
 	networkTypes[network] = getListener
 }
 
-type unixListener struct {
-	*net.UnixListener
-	mapKey string
-	count  *int32 // accessed atomically
-}
-
-func (uln *unixListener) Close() error {
-	newCount := atomic.AddInt32(uln.count, -1)
-	if newCount == 0 {
-		defer func() {
-			addr := uln.Addr().String()
-			unixSocketsMu.Lock()
-			delete(unixSockets, uln.mapKey)
-			unixSocketsMu.Unlock()
-			_ = syscall.Unlink(addr)
-		}()
-	}
-	return uln.UnixListener.Close()
-}
-
-type unixConn struct {
-	*net.UnixConn
-	filename string
-	mapKey   string
-	count    *int32 // accessed atomically
-}
-
-func (uc *unixConn) Close() error {
-	newCount := atomic.AddInt32(uc.count, -1)
-	if newCount == 0 {
-		defer func() {
-			unixSocketsMu.Lock()
-			delete(unixSockets, uc.mapKey)
-			unixSocketsMu.Unlock()
-			_ = syscall.Unlink(uc.filename)
-		}()
-	}
-	return uc.UnixConn.Close()
-}
-
-// unixSockets keeps track of the currently-active unix sockets
-// so we can transfer their FDs gracefully during reloads.
-var (
-	unixSockets = make(map[string]interface {
-		File() (*os.File, error)
-	})
-	unixSocketsMu sync.Mutex
-)
+var unixSocketsMu sync.Mutex
 
 // getListenerFromPlugin returns a listener on the given network and address
 // if a plugin has registered the network name. It may return (nil, nil) if
 // no plugin can provide a listener.
-func getListenerFromPlugin(ctx context.Context, network, addr string, config net.ListenConfig) (any, error) {
+func getListenerFromPlugin(ctx context.Context, network, host, port string, portOffset uint, config net.ListenConfig) (any, error) {
 	// get listener from plugin if network type is registered
 	if getListener, ok := networkTypes[network]; ok {
 		Log().Debug("getting listener from plugin", zap.String("network", network))
-		return getListener(ctx, network, addr, config)
+		return getListener(ctx, network, host, port, portOffset, config)
 	}
 
 	return nil, nil
@@ -685,7 +689,7 @@ func listenerKey(network, addr string) string {
 // The listeners must be capable of overlapping: with Caddy, new configs are loaded
 // before old ones are unloaded, so listeners may overlap briefly if the configs
 // both need the same listener. EXPERIMENTAL and subject to change.
-type ListenerFunc func(ctx context.Context, network, addr string, cfg net.ListenConfig) (any, error)
+type ListenerFunc func(ctx context.Context, network, host, portRange string, portOffset uint, cfg net.ListenConfig) (any, error)
 
 var networkTypes = map[string]ListenerFunc{}
 
@@ -702,15 +706,20 @@ type ListenerWrapper interface {
 	WrapListener(net.Listener) net.Listener
 }
 
+// PacketConnWrapper is a type that wraps a packet conn
+// so it can modify the input packet conn methods.
+// Modules that implement this interface are found
+// in the caddy.packetconns namespace. Usually, to
+// wrap a packet conn, you will define your own struct
+// type that embeds the input packet conn, then
+// implement your own methods that you want to wrap,
+// calling the underlying packet conn methods where
+// appropriate.
+type PacketConnWrapper interface {
+	WrapPacketConn(net.PacketConn) net.PacketConn
+}
+
 // listenerPool stores and allows reuse of active listeners.
 var listenerPool = NewUsagePool()
 
 const maxPortSpan = 65535
-
-// Interface guards (see https://github.com/caddyserver/caddy/issues/3998)
-var (
-	_ (interface{ SetReadBuffer(int) error }) = (*fakeClosePacketConn)(nil)
-	_ (interface {
-		SyscallConn() (syscall.RawConn, error)
-	}) = (*fakeClosePacketConn)(nil)
-)

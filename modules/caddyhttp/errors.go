@@ -15,19 +15,15 @@
 package caddyhttp
 
 import (
+	"errors"
 	"fmt"
-	weakrand "math/rand"
+	weakrand "math/rand/v2"
 	"path"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/caddyserver/caddy/v2"
 )
-
-func init() {
-	weakrand.Seed(time.Now().UnixNano())
-}
 
 // Error is a convenient way for a Handler to populate the
 // essential fields of a HandlerError. If err is itself a
@@ -35,7 +31,8 @@ func init() {
 // set will be populated.
 func Error(statusCode int, err error) HandlerError {
 	const idLen = 9
-	if he, ok := err.(HandlerError); ok {
+	var he HandlerError
+	if errors.As(err, &he) {
 		if he.ID == "" {
 			he.ID = randString(idLen, true)
 		}
@@ -101,7 +98,7 @@ func randString(n int, sameCase bool) string {
 	b := make([]byte, n)
 	for i := range b {
 		//nolint:gosec
-		b[i] = dict[weakrand.Int63()%int64(len(dict))]
+		b[i] = dict[weakrand.IntN(len(dict))]
 	}
 	return string(b)
 }
