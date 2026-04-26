@@ -23,13 +23,3 @@ Subject: postinst/postrm: do not leave directories on purge
  	# Add log directory with correct permissions
  	if [ ! -d /var/log/caddy ]; then
  		mkdir -p /var/log/caddy
---- a/dist/scripts/postremove.sh
-+++ b/dist/scripts/postremove.sh
-@@ -19,4 +19,5 @@
- 		deb-systemd-helper unmask caddy.service >/dev/null || true
- 		deb-systemd-helper unmask caddy-api.service >/dev/null || true
- 	fi
--fi
-\ No newline at end of file
-+        rm -rf /var/lib/caddy /var/log/caddy /etc/caddy
-+fi
