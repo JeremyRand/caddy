@@ -9,38 +9,37 @@ forwarded: not-needed
 
 --- a/cmd/commands.go
 +++ b/cmd/commands.go
-@@ -330,54 +330,6 @@
+@@ -405,51 +405,6 @@
+ 		},
  	})
  
- 	RegisterCommand(Command{
+-	RegisterCommand(Command{
 -		Name:  "upgrade",
--		Func:  cmdUpgrade,
 -		Short: "Upgrade Caddy (EXPERIMENTAL)",
 -		Long: `
 -Downloads an updated Caddy binary with the same modules/plugins at the
--latest versions. EXPERIMENTAL: May be changed or removed.`,
--		Flags: func() *flag.FlagSet {
--			fs := flag.NewFlagSet("upgrade", flag.ExitOnError)
--			fs.Bool("keep-backup", false, "Keep the backed up binary, instead of deleting it")
--			return fs
--		}(),
+-latest versions. EXPERIMENTAL: May be changed or removed.
+-`,
+-		CobraFunc: func(cmd *cobra.Command) {
+-			cmd.Flags().BoolP("keep-backup", "k", false, "Keep the backed up binary, instead of deleting it")
+-			cmd.RunE = WrapCommandFuncForCobra(cmdUpgrade)
+-		},
 -	})
 -
 -	RegisterCommand(Command{
 -		Name:  "add-package",
--		Func:  cmdAddPackage,
--		Usage: "<packages...>",
+-		Usage: "<package[@version]...>",
 -		Short: "Adds Caddy packages (EXPERIMENTAL)",
 -		Long: `
 -Downloads an updated Caddy binary with the specified packages (module/plugin)
--added. Retains existing packages. Returns an error if the any of packages are 
--already included. EXPERIMENTAL: May be changed or removed.
+-added, with an optional version specified (e.g., "package@version"). Retains
+-existing packages. Returns an error if any of the specified packages are already
+-included. EXPERIMENTAL: May be changed or removed.
 -`,
--		Flags: func() *flag.FlagSet {
--			fs := flag.NewFlagSet("add-package", flag.ExitOnError)
--			fs.Bool("keep-backup", false, "Keep the backed up binary, instead of deleting it")
--			return fs
--		}(),
+-		CobraFunc: func(cmd *cobra.Command) {
+-			cmd.Flags().BoolP("keep-backup", "k", false, "Keep the backed up binary, instead of deleting it")
+-			cmd.RunE = WrapCommandFuncForCobra(cmdAddPackage)
+-		},
 -	})
 -
 -	RegisterCommand(Command{
@@ -49,73 +48,16 @@ forwarded: not-needed
 -		Usage: "<packages...>",
 -		Short: "Removes Caddy packages (EXPERIMENTAL)",
 -		Long: `
--Downloads an updated Caddy binaries without the specified packages (module/plugin). 
--Returns an error if any of the packages are not included. 
+-Downloads an updated Caddy binaries without the specified packages (module/plugin).
+-Returns an error if any of the packages are not included.
 -EXPERIMENTAL: May be changed or removed.
 -`,
--		Flags: func() *flag.FlagSet {
--			fs := flag.NewFlagSet("remove-package", flag.ExitOnError)
--			fs.Bool("keep-backup", false, "Keep the backed up binary, instead of deleting it")
--			return fs
--		}(),
+-		CobraFunc: func(cmd *cobra.Command) {
+-			cmd.Flags().BoolP("keep-backup", "k", false, "Keep the backed up binary, instead of deleting it")
+-			cmd.RunE = WrapCommandFuncForCobra(cmdRemovePackage)
+-		},
 -	})
 -
--	RegisterCommand(Command{
- 		Name: "manpage",
- 		Func: func(fl Flags) (int, error) {
- 			dir := strings.TrimSpace(fl.String("directory"))
-@@ -416,40 +368,40 @@
- 		Use:   "completion [bash|zsh|fish|powershell]",
- 		Short: "Generate completion script",
- 		Long: fmt.Sprintf(`To load completions:
--	
-+
- 	Bash:
--	
-+
- 	  $ source <(%[1]s completion bash)
--	
-+
- 	  # To load completions for each session, execute once:
- 	  # Linux:
- 	  $ %[1]s completion bash > /etc/bash_completion.d/%[1]s
- 	  # macOS:
- 	  $ %[1]s completion bash > $(brew --prefix)/etc/bash_completion.d/%[1]s
--	
-+
- 	Zsh:
--	
-+
- 	  # If shell completion is not already enabled in your environment,
- 	  # you will need to enable it.  You can execute the following once:
--	
-+
- 	  $ echo "autoload -U compinit; compinit" >> ~/.zshrc
--	
-+
- 	  # To load completions for each session, execute once:
- 	  $ %[1]s completion zsh > "${fpath[1]}/_%[1]s"
--	
-+
- 	  # You will need to start a new shell for this setup to take effect.
--	
-+
- 	fish:
--	
-+
- 	  $ %[1]s completion fish | source
--	
-+
- 	  # To load completions for each session, execute once:
- 	  $ %[1]s completion fish > ~/.config/fish/completions/%[1]s.fish
--	
-+
- 	PowerShell:
--	
-+
- 	  PS> %[1]s completion powershell | Out-String | Invoke-Expression
--	
-+
- 	  # To load completions for every new session, run:
- 	  PS> %[1]s completion powershell > %[1]s.ps1
- 	  # and source this file from your PowerShell profile.
+ 	defaultFactory.Use(func(rootCmd *cobra.Command) {
+ 		manpageCommand := Command{
+ 			Name:  "manpage",
