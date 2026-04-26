@@ -3,7 +3,6 @@ Maintainer: Debian Go Packaging Team <team+pkg-go@tracker.debian.org>
 Uploaders: Peymaneh <peymaneh@posteo.net>
 Section: httpd
 Testsuite: autopkgtest-pkg-go
-Priority: optional
 Build-Depends: debhelper-compat (= 13),
                dh-golang,
                golang-any,
