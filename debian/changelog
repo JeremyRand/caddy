@@ -4,8 +4,18 @@ caddy (2.11.2-1) UNRELEASED; urgency=medium
   * Drop Redundant "Rules-Requires-Root: no"
   * Bump Standards-Version to 4.7.4 (no changes needed)
   * Drop "Priority: optional"
+  * Re-fresh 0008-remove-dirs-on-purge.patch
+  * Re-fresh 0004-Add-short-description-for-caddy-command.patch
+  * Re-fresh 0005-Remove-obsolote-subcommands.patch
+  * Re-fresh 0006-Add-variable-for-reproducible-manpage-time-stamps.patch
+  * Drop quic-go related patches
+  * Update B-D and Tighten B-D on proxyproto and tscert
 
- -- Nilesh Patra <nilesh@debian.org>  Sun, 26 Apr 2026 17:46:42 +0530
+TODO:
+1. Wait for golang-github-deruina-timberjack to cross NEW
+2. Fixup and investigate pb related test failures
+
+ -- Nilesh Patra <nilesh@debian.org>  Sun, 26 Apr 2026 19:39:50 +0530
 
 caddy (2.6.2-14) unstable; urgency=medium
 
