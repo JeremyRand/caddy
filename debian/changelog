@@ -1,21 +1,27 @@
-caddy (2.11.2-1) UNRELEASED; urgency=medium
+caddy (2.11.2-1) unstable; urgency=medium
 
+  * Team Upload.
   * New upstream version 2.11.2
+    (Closes: #1132041, #1110530, #1131642, #1077772)
+    + Fixes CVE-2026-27585 CVE-2026-27586 CVE-2026-27587
+      CVE-2026-27588 CVE-2026-27589 CVE-2026-27590
   * Drop Redundant "Rules-Requires-Root: no"
   * Bump Standards-Version to 4.7.4 (no changes needed)
   * Drop "Priority: optional"
   * Re-fresh 0008-remove-dirs-on-purge.patch
   * Re-fresh 0004-Add-short-description-for-caddy-command.patch
   * Re-fresh 0005-Remove-obsolote-subcommands.patch
+  * Update 0005-Remove-obsolote-subcommands.patch to remove obsolete
+    commands from test as well
   * Re-fresh 0006-Add-variable-for-reproducible-manpage-time-stamps.patch
   * Drop quic-go related patches
   * Update B-D and Tighten B-D on proxyproto and tscert
+  * Update vendored cel-go to version 0.27.0+ds-3
+  * Add patch to skip TestManageIdentity which fails for one of the cases
+  * Change Built-Using to Static-Built-Using
+  * Update lintian-overrides
 
-TODO:
-1. Wait for golang-github-deruina-timberjack to cross NEW
-2. Fixup and investigate pb related test failures
-
- -- Nilesh Patra <nilesh@debian.org>  Sun, 26 Apr 2026 19:39:50 +0530
+ -- Nilesh Patra <nilesh@debian.org>  Mon, 27 Apr 2026 18:28:38 +0530
 
 caddy (2.6.2-14) unstable; urgency=medium
 
