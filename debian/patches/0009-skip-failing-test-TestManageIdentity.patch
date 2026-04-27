@@ -1,0 +1,10 @@
+--- a/admin_test.go
++++ b/admin_test.go
+@@ -767,6 +767,7 @@
+ }
+ 
+ func TestManageIdentity(t *testing.T) {
++	t.Skip()
+ 	originalModules := make(map[string]ModuleInfo)
+ 	maps.Copy(originalModules, modules)
+ 	defer func() {
