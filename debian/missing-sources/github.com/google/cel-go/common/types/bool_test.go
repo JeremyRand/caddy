@@ -76,7 +76,7 @@ func TestBoolConvertToNative_Error(t *testing.T) {
 }
 
 func TestBoolConvertToNative_Json(t *testing.T) {
-	val, err := True.ConvertToNative(jsonValueType)
+	val, err := True.ConvertToNative(JSONValueType)
 	pbVal := &structpb.Value{Kind: &structpb.Value_BoolValue{BoolValue: true}}
 	if err != nil {
 		t.Error(err)
@@ -130,6 +130,15 @@ func TestBoolEqual(t *testing.T) {
 	}
 	if Double(0.0).Equal(False) != False {
 		t.Error("Cross-type equality yielded error value.")
+	}
+}
+
+func TestBoolIsZeroValue(t *testing.T) {
+	if True.IsZeroValue() {
+		t.Error("True.IsZeroValue() returned true, wanted false.")
+	}
+	if !False.IsZeroValue() {
+		t.Error("False.IsZeroValue() returned false, wanted true")
 	}
 }
 

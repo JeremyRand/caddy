@@ -18,21 +18,45 @@ package repl
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker/decls"
+	"github.com/google/cel-go/common/env"
+	"github.com/google/cel-go/common/functions"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/interpreter"
-	"github.com/google/cel-go/interpreter/functions"
+	"github.com/google/cel-go/ext"
 
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"go.yaml.in/yaml/v3"
+
+	test2pb "cel.dev/expr/conformance/proto2"
+	test3pb "cel.dev/expr/conformance/proto3"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
+	attrpb "google.golang.org/genproto/googleapis/rpc/context/attribute_context"
 	descpb "google.golang.org/protobuf/types/descriptorpb"
+)
+
+var (
+	extensionMap = map[string]cel.EnvOption{
+		"optional":               cel.OptionalTypes(),
+		"bindings":               ext.Bindings(),
+		"strings":                ext.Strings(),
+		"protos":                 ext.Protos(),
+		"math":                   ext.Math(),
+		"encoders":               ext.Encoders(),
+		"sets":                   ext.Sets(),
+		"lists":                  ext.Lists(),
+		"two_var_comprehensions": ext.TwoVarComprehensions(),
+	}
 )
 
 // letVariable let variable representation
@@ -130,7 +154,7 @@ func (l *letFunction) updateImpl(env *cel.Env, deps []*functions.Overload) error
 			return types.NewErr("error evaluating %s: %v", l, err)
 		}
 
-		activation := make(map[string]interface{})
+		activation := make(map[string]any)
 		for i, param := range l.params {
 			activation[param.identifier] = args[i]
 		}
@@ -257,12 +281,32 @@ type Optioner interface {
 	Option() cel.EnvOption
 }
 
+type contextOption struct {
+	opt Optioner
+	// True if the option is captured by a yaml config.
+	yaml bool
+}
+
+type genericOption struct {
+	envOpt cel.EnvOption
+}
+
+func (o *genericOption) String() string {
+	return "// unsupported %configure option. see:\n" +
+		"// %status --yaml"
+}
+
+func (o *genericOption) Option() cel.EnvOption {
+	return o.envOpt
+}
+
 // EvaluationContext context for the repl.
 // Handles maintaining state for multiple let expressions.
 type EvaluationContext struct {
-	letVars []letVariable
-	letFns  []letFunction
-	options []Optioner
+	letVars           []letVariable
+	letFns            []letFunction
+	options           []contextOption
+	enablePartialEval bool
 }
 
 func (ctx *EvaluationContext) indexLetVar(name string) int {
@@ -281,7 +325,7 @@ func (ctx *EvaluationContext) getEffectiveEnv(env *cel.Env) *cel.Env {
 		env = ctx.letFns[len(ctx.letFns)-1].env
 	} else if len(ctx.options) > 0 {
 		for _, opt := range ctx.options {
-			env, _ = env.Extend(opt.Option())
+			env, _ = env.Extend(opt.opt.Option())
 		}
 	}
 
@@ -299,12 +343,13 @@ func (ctx *EvaluationContext) indexLetFn(name string) int {
 
 func (ctx *EvaluationContext) copy() *EvaluationContext {
 	var cpy EvaluationContext
-	cpy.options = make([]Optioner, len(ctx.options))
+	cpy.options = make([]contextOption, len(ctx.options))
 	copy(cpy.options, ctx.options)
 	cpy.letVars = make([]letVariable, len(ctx.letVars))
 	copy(cpy.letVars, ctx.letVars)
 	cpy.letFns = make([]letFunction, len(ctx.letFns))
 	copy(cpy.letFns, ctx.letFns)
+	cpy.enablePartialEval = ctx.enablePartialEval
 	return &cpy
 }
 
@@ -402,8 +447,9 @@ func (ctx *EvaluationContext) addLetFn(name string, params []letFunctionParam, r
 	}
 }
 
-func (ctx *EvaluationContext) addOption(opt Optioner) {
-	ctx.options = append(ctx.options, opt)
+func (ctx *EvaluationContext) addOption(opt Optioner, isYAML bool) {
+	ctx.options = append(ctx.options,
+		contextOption{opt: opt, yaml: isYAML})
 
 	for i := 0; i < len(ctx.letVars); i++ {
 		// invalidate dependant let exprs
@@ -413,12 +459,16 @@ func (ctx *EvaluationContext) addOption(opt Optioner) {
 
 // programOptions generates the program options for planning.
 // Assumes context has been planned.
-func (ctx *EvaluationContext) programOptions() cel.ProgramOption {
+func (ctx *EvaluationContext) programOptions() []cel.ProgramOption {
 	var fns = make([]*functions.Overload, len(ctx.letFns))
 	for i, fn := range ctx.letFns {
 		fns[i] = fn.generateFunction()
 	}
-	return cel.Functions(fns...)
+	result := []cel.ProgramOption{cel.Functions(fns...)}
+	if ctx.enablePartialEval {
+		result = append(result, cel.EvalOptions(cel.OptPartialEval))
+	}
+	return result
 }
 
 // Evaluator provides basic environment for evaluating an expression with
@@ -430,7 +480,7 @@ type Evaluator struct {
 
 // NewEvaluator returns an inialized evaluator
 func NewEvaluator() (*Evaluator, error) {
-	env, err := cel.NewEnv()
+	env, err := cel.NewEnv(cel.EnableMacroCallTracking())
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +495,7 @@ func NewEvaluator() (*Evaluator, error) {
 func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error {
 	for _, opt := range ctx.options {
 		var err error
-		env, err = env.Extend(opt.Option())
+		env, err = env.Extend(opt.opt.Option())
 		if err != nil {
 			return err
 		}
@@ -483,7 +533,7 @@ func updateContextPlans(ctx *EvaluationContext, env *cel.Env) error {
 			el.ast = ast
 			el.resultType = ast.ResultType()
 
-			plan, err := env.Program(ast, ctx.programOptions())
+			plan, err := env.Program(ast, ctx.programOptions()...)
 			if err != nil {
 				return err
 			}
@@ -564,7 +614,31 @@ func (e *Evaluator) AddDeclFn(name string, params []letFunctionParam, typeHint *
 // Returns an error if setting the option prevents planning any of the defined let expressions.
 func (e *Evaluator) AddOption(opt Optioner) error {
 	cpy := e.ctx.copy()
-	cpy.addOption(opt)
+	cpy.addOption(opt, false)
+	err := updateContextPlans(cpy, e.env)
+	if err != nil {
+		return err
+	}
+	e.ctx = *cpy
+	return nil
+}
+
+// AddSerializableOption adds an option to the basic environment that is flagged as YAML compatible.
+func (e *Evaluator) AddSerializableOption(opt Optioner) error {
+	cpy := e.ctx.copy()
+	cpy.addOption(opt, true)
+	err := updateContextPlans(cpy, e.env)
+	if err != nil {
+		return err
+	}
+	e.ctx = *cpy
+	return nil
+}
+
+// EnablePartialEval enables the option to allow partial evaluations.
+func (e *Evaluator) EnablePartialEval() error {
+	cpy := e.ctx.copy()
+	cpy.enablePartialEval = true
 	err := updateContextPlans(cpy, e.env)
 	if err != nil {
 		return err
@@ -599,37 +673,289 @@ func (e *Evaluator) DelLetFn(name string) error {
 	return nil
 }
 
-// Status returns a stringified view of the current evaluator state.
-func (e *Evaluator) Status() string {
-	var options, funcs, vars string
+type statusFormat int
 
-	for _, opt := range e.ctx.options {
-		options = options + fmt.Sprintf("%s\n", opt)
+const (
+	statusFormatREPL statusFormat = iota
+	statusFormatYAML
+	statusFomatUnspecfied
+)
+
+func (e *Evaluator) handleStatus(args []string) (string, error) {
+	format := statusFormatREPL
+	for _, a := range args {
+		switch a {
+		case "--yaml":
+			format = statusFormatYAML
+		case "--repl":
+			format = statusFormatREPL
+		default:
+			return "", fmt.Errorf("status: unsupported option: '%s'", a)
+		}
 	}
 
-	for _, fn := range e.ctx.letFns {
-		cmd := "let"
-		if fn.src == "" {
-			cmd = "declare"
+	switch format {
+	case statusFormatREPL:
+		return e.REPLConfig(), nil
+	case statusFormatYAML:
+		return e.YAMLConfig()
+	}
+
+	return "", errors.New("status: unsupported status format requested")
+}
+
+func (e *Evaluator) handleConfig(args []string) (string, error) {
+	format := statusFormatREPL
+	var fromFile bool
+	var configRef string
+	for _, a := range args {
+		switch a {
+		case "--yaml":
+			format = statusFormatYAML
+		case "--repl":
+			format = statusFormatREPL
+		case "--file":
+			fromFile = true
+		default:
+			configRef = a
 		}
-		funcs = funcs + fmt.Sprintf("%%%s %s\n", cmd, fn)
+	}
+
+	if configRef == "" {
+		return "", errors.New("config: no config provided")
+	}
+	src := []byte(configRef)
+	if fromFile {
+		tmp, err := os.ReadFile(configRef)
+		if err != nil {
+			return "", fmt.Errorf("configure: %w", err)
+		}
+		src = tmp
+	}
+
+	switch format {
+	case statusFormatYAML:
+		return e.parseYAMLConfig(src)
+	}
+
+	return "", fmt.Errorf("configure: not yet implemented %v %v %v ", format, fromFile, configRef)
+}
+
+// REPLConfig returns a stringified view of the current evaluator state in terms of REPL Commands.
+func (e *Evaluator) REPLConfig() string {
+	var status strings.Builder
+
+	if len(e.ctx.options) > 0 {
+		status.WriteString("// Options\n")
+		for _, opt := range e.ctx.options {
+			status.WriteString(fmt.Sprintf("%s\n", opt.opt))
+		}
+		status.WriteString("\n")
+	}
+
+	if len(e.ctx.letFns) > 0 {
+		status.WriteString("// Functions\n")
+		for _, fn := range e.ctx.letFns {
+			cmd := "let"
+			if fn.src == "" {
+				cmd = "declare"
+			}
+			status.WriteString(fmt.Sprintf("%%%s %s\n", cmd, fn))
+		}
+		status.WriteString("\n")
+	}
+
+	if len(e.ctx.letVars) > 0 {
+		status.WriteString("// Variables\n")
+		for _, lVar := range e.ctx.letVars {
+			cmd := "let"
+			if lVar.src == "" {
+				cmd = "declare"
+			}
+			status.WriteString(fmt.Sprintf("%%%s %s\n", cmd, lVar))
+		}
+		status.WriteString("\n")
+	}
+	return status.String()
+}
+
+func pruneDuplicateDecls(conf *env.Config) {
+	// Duplicate variables are allowed when they have an equivalent type. The way the REPL handles
+	// bindings ends up with a declaration in the config and a repeat when the "%let" operation is
+	// applied. Filter here to keep the config clear.
+	filtered := make([]*env.Variable, 0, len(conf.Variables))
+	seen := make(map[string]bool)
+	for _, v := range conf.Variables {
+		if seen[v.Name] {
+			continue
+		}
+		seen[v.Name] = true
+		filtered = append(filtered, v)
+	}
+	conf.Variables = filtered
+}
+
+// YAMLConfig returns a yaml-based CEL environment representing the current evaluator state.
+func (e *Evaluator) YAMLConfig() (string, error) {
+	var status strings.Builder
+	status.WriteString("# CEL environment YAML\n")
+	conf, err := e.getEffectiveEnv().ToConfig("repl-session")
+	if err != nil {
+		return "", fmt.Errorf("status: REPL env broken: %w", err)
+	}
+	pruneDuplicateDecls(conf)
+	data, err := yaml.Marshal(conf)
+	if err != nil {
+		return "", fmt.Errorf("status: unserializable YAML environment: %w", err)
+	}
+	status.Write(data)
+	status.WriteString("\n\n# REPL Bindings: \n")
+
+	for _, opt := range e.ctx.options {
+		if !opt.yaml {
+			status.WriteString(fmt.Sprintf("# %s\n", opt.opt))
+		}
+	}
+
+	for _, lFn := range e.ctx.letFns {
+		if lFn.src == "" {
+			// Declaration handled in the standard YAML
+			continue
+		}
+		lines := strings.Split(lFn.String(), "\n")
+		for i, l := range lines {
+			if i == 0 {
+				status.WriteString("# %let ")
+			} else {
+				status.WriteString("# ")
+			}
+			status.WriteString(l)
+			if i < len(lines)-1 {
+				status.WriteString("\\\n")
+			}
+		}
+		status.WriteString("\n#\n")
 	}
 
 	for _, lVar := range e.ctx.letVars {
-		cmd := "let"
 		if lVar.src == "" {
-			cmd = "declare"
+			continue
 		}
-		vars = vars + fmt.Sprintf("%%%s %s\n", cmd, lVar)
+		lines := strings.Split(lVar.String(), "\n")
+		for i, l := range lines {
+			if i == 0 {
+				status.WriteString("# %let ")
+			} else {
+				status.WriteString("# ")
+			}
+			status.WriteString(l)
+			if i < len(lines)-1 {
+				status.WriteString("\\\n")
+			}
+		}
+		status.WriteString("\n#\n")
 	}
-	return fmt.Sprintf("// Options\n%s\n// Functions\n%s\n// Variables\n%s", options, funcs, vars)
+
+	return status.String(), nil
+}
+
+var trailerRegexp = regexp.MustCompile("# REPL Bindings:")
+
+func (e *Evaluator) parseYAMLConfig(conf []byte) (string, error) {
+	yamlSrc := conf
+	var replSrc []byte
+
+	pos := trailerRegexp.FindIndex(conf)
+	if len(pos) == 2 {
+		yamlSrc = conf[0:pos[0]]
+		replSrc = conf[pos[1]:]
+	}
+
+	var c env.Config
+	if err := yaml.Unmarshal(yamlSrc, &c); err != nil {
+		return "", fmt.Errorf("configure (yaml): %w", err)
+	}
+
+	s := string(replSrc)
+
+	lines := strings.Split(s, "\n")
+
+	// A little unfortunate, but we need to apply option commands manually
+	// before the yaml environment. This is mainly because the yaml doesn't
+	// describe how to lookup extension types (e.g. load_descriptors).
+	updated, _ := NewEvaluator()
+
+	var cmds []Cmder
+	var sb strings.Builder
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "# ") {
+			continue
+		}
+		norm := strings.TrimPrefix(line, "# ")
+		if strings.HasSuffix(norm, "\\") {
+			norm = strings.TrimSuffix(norm, "\\")
+			sb.WriteString(norm)
+			sb.WriteString("\n")
+			continue
+		}
+		sb.WriteString(norm)
+		cmd := sb.String()
+		sb.Reset()
+		pCmd, err := Parse(cmd)
+		if err != nil {
+			return "", fmt.Errorf("configure: invalid REPL command: %w", err)
+		}
+		switch pCmd.(type) {
+		case *letFnCmd, *letVarCmd:
+			cmds = append(cmds, pCmd)
+			continue
+		}
+		_, exit, err := updated.Process(pCmd)
+
+		if exit {
+			return "", errors.New("configure: config triggered an exit")
+		}
+		if err != nil {
+			return "", fmt.Errorf("configure: failed to process option %w", err)
+		}
+	}
+
+	if len(updated.ctx.letFns) > 0 || len(updated.ctx.letVars) > 0 {
+		return "", errors.New("configure: unsupported REPL config. Option defines variables")
+	}
+
+	err := updated.AddSerializableOption(&genericOption{envOpt: cel.FromConfig(&c, ext.ExtensionOptionFactory)})
+
+	if err != nil {
+		return "", fmt.Errorf("configure: failed to apply yaml: %w", err)
+	}
+
+	// Apply bindings now.
+	for _, cmd := range cmds {
+		_, exit, err := updated.Process(cmd)
+
+		if exit {
+			return "", errors.New("configure: config triggered an exit")
+		}
+		if err != nil {
+			return "", fmt.Errorf("configure: failed to apply let: %w", err)
+		}
+	}
+
+	*e, *updated = *updated, *e
+	return "<loaded config>", nil
+}
+
+func (e *Evaluator) getEffectiveEnv() *cel.Env {
+	env := e.ctx.getEffectiveEnv(e.env)
+	return env
 }
 
 // applyContext evaluates the let expressions in the context to build an activation for the given expression.
 // returns the environment for compiling and planning the top level CEL expression and an activation with the
 // values of the let expressions.
-func (e *Evaluator) applyContext() (*cel.Env, interpreter.Activation, error) {
-	var vars = make(map[string]interface{})
+func (e *Evaluator) applyContext() (*cel.Env, cel.Activation, error) {
+	var vars = make(map[string]any)
 
 	for _, el := range e.ctx.letVars {
 		if el.prog == nil {
@@ -645,22 +971,42 @@ func (e *Evaluator) applyContext() (*cel.Env, interpreter.Activation, error) {
 		}
 	}
 
-	act, err := interpreter.NewActivation(vars)
+	act, err := cel.NewActivation(vars)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return e.ctx.getEffectiveEnv(e.env), act, nil
+	return e.getEffectiveEnv(), act, nil
 }
 
 // typeOption implements optioner for loading a set of types defined by a protobuf file descriptor set.
 type typeOption struct {
-	path string
-	fds  *descpb.FileDescriptorSet
+	path  string
+	fds   *descpb.FileDescriptorSet
+	isPkg bool
 }
 
 func (o *typeOption) String() string {
-	return fmt.Sprintf("%%load_descriptors '%s'", o.path)
+	flags := ""
+	if o.isPkg {
+		flags = "--pkg"
+	}
+	return fmt.Sprintf("%%load_descriptors %s '%s'", flags, o.path)
+}
+
+type backtickOpt struct {
+	enabled bool
+}
+
+func (o *backtickOpt) Option() cel.EnvOption {
+	if o.enabled {
+		return cel.EnableIdentifierEscapeSyntax()
+	}
+	return func(e *cel.Env) (*cel.Env, error) { return e, nil }
+}
+
+func (o *backtickOpt) String() string {
+	return "%option --enable_escaped_fields"
 }
 
 func (o *typeOption) Option() cel.EnvOption {
@@ -679,6 +1025,39 @@ func (o *containerOption) Option() cel.EnvOption {
 	return cel.Container(o.container)
 }
 
+// extensionOption implements optional for loading a specific extension into the environment (String, Math, Proto, Encoder)
+type extensionOption struct {
+	extensionType string
+	option        cel.EnvOption
+}
+
+func (o *extensionOption) String() string {
+	return fmt.Sprintf("%%option --extension '%s'", o.extensionType)
+}
+
+func (o extensionOption) Option() cel.EnvOption {
+	return o.option
+}
+
+func newExtensionOption(extType string) (*extensionOption, error) {
+	extType = strings.ToLower(extType)
+	if extOption, found := extensionMap[extType]; found {
+		return &extensionOption{extensionType: extType, option: extOption}, nil
+	} else {
+		keys := make([]string, 0)
+		for k := range extensionMap {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		extKeyName := make([]string, 0, len(keys))
+		for _, k := range keys {
+			extKeyName = append(extKeyName, "'"+k+"'")
+		}
+		joinedOptions := "['all', " + strings.Join(extKeyName, ", ") + "]"
+		return nil, fmt.Errorf("unknown option: %s. Available options are: %s", extType, joinedOptions)
+	}
+}
+
 // setOption sets a number of options on the environment. returns an error if
 // any of them fail.
 func (e *Evaluator) setOption(args []string) error {
@@ -686,17 +1065,30 @@ func (e *Evaluator) setOption(args []string) error {
 	for idx := 0; idx < len(args); {
 		arg := args[idx]
 		idx++
-		if arg == "--container" {
-			if idx >= len(args) {
-				issues = append(issues, "not enough args for container")
-			}
-			container := args[idx]
+		switch arg {
+		case "--container":
+			err := e.loadContainerOption(idx, args)
 			idx++
-			err := e.AddOption(&containerOption{container: container})
 			if err != nil {
 				issues = append(issues, fmt.Sprintf("container: %v", err))
 			}
-		} else {
+		case "--extension":
+			err := e.loadExtensionOption(idx, args)
+			idx++
+			if err != nil {
+				issues = append(issues, fmt.Sprintf("extension: %v", err))
+			}
+		case "--enable_escaped_fields":
+			err := e.AddSerializableOption(&backtickOpt{enabled: true})
+			if err != nil {
+				issues = append(issues, fmt.Sprintf("enable_escaped_fields: %v", err))
+			}
+		case "--enable_partial_eval":
+			err := e.EnablePartialEval()
+			if err != nil {
+				issues = append(issues, fmt.Sprintf("enable_partial_eval: %v", err))
+			}
+		default:
 			issues = append(issues, fmt.Sprintf("unsupported option '%s'", arg))
 		}
 	}
@@ -706,8 +1098,65 @@ func (e *Evaluator) setOption(args []string) error {
 	return nil
 }
 
+func checkOptionArgs(idx int, args []string) error {
+	if idx >= len(args) {
+		return fmt.Errorf("not enough arguments")
+	}
+	return nil
+}
+
+func (e *Evaluator) loadContainerOption(idx int, args []string) error {
+	err := checkOptionArgs(idx, args)
+	if err != nil {
+		return err
+	}
+
+	container := args[idx]
+	idx++
+	err = e.AddSerializableOption(&containerOption{container: container})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *Evaluator) loadExtensionOption(idx int, args []string) error {
+	err := checkOptionArgs(idx, args)
+	if err != nil {
+		return err
+	}
+
+	argExtType := args[idx]
+	if argExtType == "all" {
+		// Load all extension types as a convenience
+		for val := range extensionMap {
+			err := e.loadExtensionOptionType(val)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return e.loadExtensionOptionType(argExtType)
+}
+
+func (e *Evaluator) loadExtensionOptionType(extType string) error {
+	extensionOption, err := newExtensionOption(extType)
+	if err != nil {
+		return err
+	}
+
+	err = e.AddSerializableOption(extensionOption)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
 func loadFileDescriptorSet(path string, textfmt bool) (*descpb.FileDescriptorSet, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -727,21 +1176,51 @@ func loadFileDescriptorSet(path string, textfmt bool) (*descpb.FileDescriptorSet
 	return &fds, nil
 }
 
-func (e *Evaluator) loadDescriptors(args []string) error {
-	if len(args) < 1 {
-		return errors.New("expected path for load descriptors")
-	}
-	flag := ""
-	if len(args) > 1 {
-		flag = args[0]
+func deps(d protoreflect.FileDescriptor) []*descpb.FileDescriptorProto {
+	var descriptorProtos []*descpb.FileDescriptorProto
+
+	for i := 0; i < d.Imports().Len(); i++ {
+		descriptorProtos = append(descriptorProtos,
+			protodesc.ToFileDescriptorProto(d.Imports().Get(i)))
 	}
 
-	textfmt := true
-	if flag == "--binarypb" {
-		textfmt = false
+	return descriptorProtos
+}
+
+func (e *Evaluator) loadDescriptorFromPackage(pkg string) error {
+	switch pkg {
+	case "cel-spec-test-types":
+		fdp := (&test2pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
+		fdp2 := (&test3pb.TestAllTypes{}).ProtoReflect().Type().Descriptor().ParentFile()
+
+		descriptorProtos := deps(fdp)
+
+		descriptorProtos = append(descriptorProtos,
+			protodesc.ToFileDescriptorProto(fdp),
+			protodesc.ToFileDescriptorProto(fdp2))
+
+		fds := descpb.FileDescriptorSet{
+			File: descriptorProtos,
+		}
+
+		return e.AddOption(&typeOption{pkg, &fds, true})
+	case "google-rpc":
+		fdp := (&attrpb.AttributeContext{}).ProtoReflect().Type().Descriptor().ParentFile()
+
+		descriptorProtos := append(deps(fdp),
+			protodesc.ToFileDescriptorProto(fdp))
+
+		fds := descpb.FileDescriptorSet{
+			File: descriptorProtos,
+		}
+
+		return e.AddOption(&typeOption{pkg, &fds, true})
 	}
 
-	p := args[len(args)-1]
+	return fmt.Errorf("unknown type package: '%s'", pkg)
+}
+
+func (e *Evaluator) loadDescriptorFromFile(p string, textfmt bool) error {
 	fds, err := loadFileDescriptorSet(p, textfmt)
 	if err != nil {
 		return fmt.Errorf("error loading file: %v", err)
@@ -750,15 +1229,102 @@ func (e *Evaluator) loadDescriptors(args []string) error {
 	return e.AddOption(&typeOption{path: p, fds: fds})
 }
 
+func (e *Evaluator) loadDescriptors(args []string) error {
+	if len(args) < 1 {
+		return errors.New("expected args for load descriptors")
+	}
+
+	textfmt := true
+
+	var paths []string
+	var pkgs []string
+	nextIsPkg := false
+	for _, flag := range args {
+		switch flag {
+		case "--binarypb":
+			{
+				textfmt = false
+			}
+		case "--pkg":
+			{
+				nextIsPkg = true
+			}
+		default:
+			{
+				if nextIsPkg {
+					pkgs = append(pkgs, flag)
+					nextIsPkg = false
+				} else {
+					paths = append(paths, flag)
+				}
+			}
+		}
+	}
+
+	for _, p := range paths {
+		err := e.loadDescriptorFromFile(p, textfmt)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, p := range pkgs {
+		err := e.loadDescriptorFromPackage(p)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Process processes the command provided.
 func (e *Evaluator) Process(cmd Cmder) (string, bool, error) {
 	switch cmd := cmd.(type) {
+	case *compileCmd:
+		ast, err := e.Compile(cmd.expr)
+		if err != nil {
+			return "", false, fmt.Errorf("compile failed:\n%v", err)
+		}
+		cAST, err := cel.AstToCheckedExpr(ast)
+		if err != nil {
+			return "", false, fmt.Errorf("compile failed:\n%v", err)
+		}
+		return prototext.Format(cAST), false, nil
+	case *parseCmd:
+		ast, err := e.Parse(cmd.expr)
+		if err != nil {
+			return "", false, fmt.Errorf("parse failed:\n%v", err)
+		}
+		pAST, err := cel.AstToParsedExpr(ast)
+		if err != nil {
+			return "", false, fmt.Errorf("parse failed:\n%v", err)
+		}
+		return prototext.Format(pAST), false, nil
 	case *evalCmd:
-		val, resultT, err := e.Evaluate(cmd.expr)
+		var (
+			val     ref.Val
+			resultT *exprpb.Type
+			err     error
+		)
+		if cmd.parseOnly {
+			val, resultT, err = e.EvaluateParseOnly(cmd.expr)
+		} else {
+			val, resultT, err = e.Evaluate(cmd.expr)
+		}
 		if err != nil {
 			return "", false, fmt.Errorf("expr failed:\n%v", err)
 		}
 		if val != nil {
-			return fmt.Sprintf("%v : %s", val.Value(), UnparseType(resultT)), false, nil
+			unknown, ok := val.Value().(*types.Unknown)
+			if ok {
+				return fmt.Sprintf("Unknown %v", unknown), false, nil
+			}
+			if cmd.parseOnly {
+				return fmt.Sprintf("%s", types.Format(val)), false, nil
+			}
+			t := UnparseType(resultT)
+			return fmt.Sprintf("%s : %s", types.Format(val), t), false, nil
 		}
 	case *letVarCmd:
 		var err error
@@ -795,8 +1361,12 @@ func (e *Evaluator) Process(cmd Cmder) (string, bool, error) {
 			return "", true, nil
 		case "null":
 			return "", false, nil
+		case "configure":
+			out, err := e.handleConfig(cmd.args)
+			return out, false, err
 		case "status":
-			return e.Status(), false, nil
+			out, err := e.handleStatus(cmd.args)
+			return out, false, err
 		case "load_descriptors":
 			return "", false, e.loadDescriptors(cmd.args)
 		case "option":
@@ -813,7 +1383,7 @@ func (e *Evaluator) Process(cmd Cmder) (string, bool, error) {
 	return "", false, nil
 }
 
-// Evaluate sets up a CEL evaluation using the current evaluation context.
+// Evaluate sets up a CEL evaluation using the current REPL context.
 func (e *Evaluator) Evaluate(expr string) (ref.Val, *exprpb.Type, error) {
 	env, act, err := e.applyContext()
 	if err != nil {
@@ -821,16 +1391,66 @@ func (e *Evaluator) Evaluate(expr string) (ref.Val, *exprpb.Type, error) {
 	}
 
 	ast, iss := env.Compile(expr)
-	if iss != nil {
+	if iss.Err() != nil {
 		return nil, nil, iss.Err()
 	}
 
-	p, err := env.Program(ast, e.ctx.programOptions())
+	p, err := env.Program(ast, e.ctx.programOptions()...)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	act, _ = env.PartialVars(act)
 	val, _, err := p.Eval(act)
 	// expression can be well-formed and result in an error
 	return val, ast.ResultType(), err
+}
+
+// EvaluateParseOnly evalutes the CEL expression using the current REPL context without type checking.
+func (e *Evaluator) EvaluateParseOnly(expr string) (ref.Val, *exprpb.Type, error) {
+	env, act, err := e.applyContext()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ast, iss := env.Parse(expr)
+	if iss.Err() != nil {
+		return nil, nil, iss.Err()
+	}
+
+	p, err := env.Program(ast, e.ctx.programOptions()...)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	act, _ = env.PartialVars(act)
+	val, _, err := p.Eval(act)
+	// expression can be well-formed and result in an error
+	return val, ast.ResultType(), err
+}
+
+// Compile compiles the input expression using the current REPL context.
+func (e *Evaluator) Compile(expr string) (*cel.Ast, error) {
+	env, _, err := e.applyContext()
+	if err != nil {
+		return nil, err
+	}
+	ast, iss := env.Compile(expr)
+	if iss.Err() != nil {
+		return nil, iss.Err()
+	}
+	return ast, nil
+}
+
+// Parse parses the input expression using the current REPL context.
+func (e *Evaluator) Parse(expr string) (*cel.Ast, error) {
+	env, _, err := e.applyContext()
+	if err != nil {
+		return nil, err
+	}
+	ast, iss := env.Parse(expr)
+	if iss.Err() != nil {
+		return nil, iss.Err()
+	}
+	return ast, nil
 }

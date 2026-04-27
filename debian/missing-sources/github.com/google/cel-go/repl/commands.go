@@ -19,23 +19,57 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/cel-go/repl/parser"
+	antlr "github.com/antlr4-go/antlr/v4"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/google/cel-go/repl/parser"
 
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 )
 
-var letUsage = `Let introduces a variable or function defined by a sub-CEL expression.
+var (
+	compileUsage = `Compile emits a textproto representation of the compiled expression.
+%compile <expr>`
+
+	parseUsage = `Parse emits a textproto representation of the parsed expression.
+%parse <expr>`
+
+	declareUsage = `Declare introduces a variable or function for type checking, but
+doesn't define a value for it:
+%declare <identifier> : <type>
+%declare <identifier> (<param_identifier> : <param_type>, ...) : <result-type>`
+
+	deleteUsage = `Delete removes a variable or function declaration from the evaluation context.
+%delete <identifier>`
+
+	letUsage = `Let introduces a variable or function defined by a sub-CEL expression.
 %let <identifier> (: <type>)? = <expr>
 %let <identifier> (<param_identifier> : <param_type>, ...) : <result-type> -> <expr>`
 
-var declareUsage = `Declare introduces a variable or function for type checking, but doesn't define a value for it.
-%declare <identifier> : <type>
-%declare <identifier> (<param_identifier> : <param_type>, ...) : <result-type>
-`
-var deleteUsage = `Delete removes a variable or function declaration from the evaluation context.
-%delete <identifier>`
+	optionUsage = `Option enables a CEL environment option which enables configuration and
+optional language features.
+%option --container 'google.protobuf'
+%option --extension 'all'`
+
+	loadDescriptorsUsage = `LoadDescriptors loads a protobuf descriptor file (google.protobuf.FileDescriptorSet)
+from disk or from a predefined package. Supported packages are "cel-spec-test-types"
+(TestAllTypes) and "google-rpc" (AttributeContext).
+%load_descriptors 'path/to/descriptor_set.binarypb'
+%load_descriptors --pkg 'cel-spec-test-types'`
+
+	exitUsage = `Exit terminates the REPL.
+%exit`
+
+	helpUsage = `Help prints usage information for the commands supported by the REPL.
+%help`
+
+	statusUsage = `Status prints the current state of the REPL session
+%status
+%status --yaml`
+
+	configUsage = `Config loads a canned REPL state from a config file
+%configure """%let foo : int = 42"""
+%configure --yaml --file 'path/to/env.yaml'`
+)
 
 type letVarCmd struct {
 	identifier string
@@ -59,8 +93,17 @@ type simpleCmd struct {
 	args []string
 }
 
-type evalCmd struct {
+type compileCmd struct {
 	expr string
+}
+
+type parseCmd struct {
+	expr string
+}
+
+type evalCmd struct {
+	parseOnly bool
+	expr      string
 }
 
 // Cmder interface provides normalized command name from a repl command.
@@ -91,6 +134,14 @@ func (c *delCmd) Cmd() string {
 
 func (c *simpleCmd) Cmd() string {
 	return c.cmd
+}
+
+func (c *compileCmd) Cmd() string {
+	return "compile"
+}
+
+func (c *parseCmd) Cmd() string {
+	return "parse"
 }
 
 func (c *evalCmd) Cmd() string {
@@ -150,16 +201,30 @@ func Parse(line string) (Cmder, error) {
 		if listener.usage != "" {
 			errFmt = append(errFmt, "", "Usage:", listener.usage)
 		}
-		return nil, errors.New(strings.Join(errFmt, "\n"))
+		return nil, fmt.Errorf("invalid command: %v", strings.Join(errFmt, "\n"))
 	}
-
+	if listener.cmd.Cmd() == "help" {
+		return nil, errors.New(strings.Join([]string{
+			compileUsage,
+			parseUsage,
+			declareUsage,
+			deleteUsage,
+			letUsage,
+			statusUsage,
+			configUsage,
+			optionUsage,
+			loadDescriptorsUsage,
+			helpUsage,
+			exitUsage,
+		}, "\n\n"))
+	}
 	return listener.cmd, nil
 }
 
 // ANTLR interface implementations
 
 // Implement antlr ErrorListener interface for syntax errors.
-func (c *commandParseListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
+func (c *commandParseListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol any, line, column int, msg string, e antlr.RecognitionException) {
 	c.errs = append(c.errs, fmt.Errorf("(%d:%d) %s", line, column, msg))
 }
 
@@ -183,6 +248,10 @@ func (c *commandParseListener) EnterSimple(ctx *parser.SimpleContext) {
 	c.cmd = &simpleCmd{cmd: cmd, args: args}
 }
 
+func (c *commandParseListener) EnterHelp(ctx *parser.HelpContext) {
+	c.cmd = &simpleCmd{cmd: "help"}
+}
+
 func (c *commandParseListener) EnterEmpty(ctx *parser.EmptyContext) {
 	c.cmd = &simpleCmd{cmd: "null"}
 }
@@ -191,7 +260,7 @@ func (c *commandParseListener) EnterLet(ctx *parser.LetContext) {
 	c.usage = letUsage
 	if ctx.GetFn() != nil {
 		c.cmd = &letFnCmd{}
-	} else if ctx.GetVar() != nil {
+	} else if ctx.GetVar_() != nil {
 		c.cmd = &letVarCmd{}
 	} else {
 		c.errs = append(c.errs, fmt.Errorf("missing declaration in let"))
@@ -202,7 +271,7 @@ func (c *commandParseListener) EnterDeclare(ctx *parser.DeclareContext) {
 	c.usage = declareUsage
 	if ctx.GetFn() != nil {
 		c.cmd = &letFnCmd{}
-	} else if ctx.GetVar() != nil {
+	} else if ctx.GetVar_() != nil {
 		c.cmd = &letVarCmd{}
 	} else {
 		c.errs = append(c.errs, fmt.Errorf("missing declaration in declare"))
@@ -224,15 +293,34 @@ func (c *commandParseListener) ExitDeclare(ctx *parser.DeclareContext) {
 
 func (c *commandParseListener) EnterDelete(ctx *parser.DeleteContext) {
 	c.usage = deleteUsage
-	if ctx.GetVar() == nil && ctx.GetFn() == nil {
+	if ctx.GetVar_() == nil && ctx.GetFn() == nil {
 		c.reportIssue(errors.New("missing identifier in delete"))
 		return
 	}
 	c.cmd = &delCmd{}
 }
 
+func (c *commandParseListener) EnterCompile(ctx *parser.CompileContext) {
+	c.cmd = &compileCmd{}
+}
+
+func (c *commandParseListener) EnterParse(ctx *parser.ParseContext) {
+	c.cmd = &parseCmd{}
+}
+
 func (c *commandParseListener) EnterExprCmd(ctx *parser.ExprCmdContext) {
-	c.cmd = &evalCmd{}
+	cmd := &evalCmd{}
+	for _, f := range ctx.GetFlags() {
+		ft := strings.TrimPrefix(strings.TrimPrefix(f.GetText(), "--"), "-")
+		switch ft {
+		case "parse-only":
+			cmd.parseOnly = true
+		default:
+			c.reportIssue(fmt.Errorf("unknown or unsupported flag: %q", ft))
+			return
+		}
+	}
+	c.cmd = cmd
 }
 
 func (c *commandParseListener) ExitFnDecl(ctx *parser.FnDeclContext) {
@@ -314,6 +402,10 @@ func (c *commandParseListener) ExitVarDecl(ctx *parser.VarDeclContext) {
 func (c *commandParseListener) ExitExpr(ctx *parser.ExprContext) {
 	expr := extractSourceText(ctx)
 	switch cmd := c.cmd.(type) {
+	case *compileCmd:
+		cmd.expr = expr
+	case *parseCmd:
+		cmd.expr = expr
 	case *evalCmd:
 		cmd.expr = expr
 	case *letFnCmd:

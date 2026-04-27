@@ -16,14 +16,16 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
 
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
@@ -125,7 +127,7 @@ func TestBaseListConvertToNative_Any(t *testing.T) {
 
 func TestBaseListConvertToNative_Json(t *testing.T) {
 	list := NewDynamicList(newTestRegistry(t), []float64{1.0, 2.0})
-	val, err := list.ConvertToNative(jsonListValueType)
+	val, err := list.ConvertToNative(JSONListType)
 	if err != nil {
 		t.Error(err)
 	}
@@ -162,11 +164,11 @@ func TestBaseListEqual(t *testing.T) {
 	if listA.Equal(listB) != False {
 		t.Error("listA.Equal(listB) did not return false.")
 	}
-	listC := reg.NativeToValue([]interface{}{"h", "e", "l", "l", String("o")})
+	listC := reg.NativeToValue([]any{"h", "e", "l", "l", String("o")})
 	if listA.Equal(listC) != True {
 		t.Error("listA.Equal(listC) did not return true.")
 	}
-	listD := reg.NativeToValue([]interface{}{"h", "e", 1, "p", "!"})
+	listD := reg.NativeToValue([]any{"h", "e", 1, "p", "!"})
 	if listA.Equal(listD) != False {
 		t.Error("listA.Equal(listD) did not return true")
 	}
@@ -176,7 +178,93 @@ func TestBaseListEqual(t *testing.T) {
 }
 
 func TestBaseListGet(t *testing.T) {
-	validateList123(t, NewDynamicList(newTestRegistry(t), []int32{1, 2, 3}).(traits.Lister))
+	validateList123(t, NewDynamicList(newTestRegistry(t), []int32{1, 2, 3}))
+}
+
+func TestBaseListString(t *testing.T) {
+	l := DefaultTypeAdapter.NativeToValue([]any{1, "hello", 2.1, true, []string{"world"}})
+	want := `[1, hello, 2.1, true, [world]]`
+	if fmt.Sprintf("%v", l) != want {
+		t.Errorf("l.String() got %v, wanted %v", l, want)
+	}
+}
+
+func TestConcatListString(t *testing.T) {
+	l := DefaultTypeAdapter.NativeToValue([]any{1, "hello", 2.1, true}).(traits.Lister)
+	c := l.Add(DefaultTypeAdapter.NativeToValue([]string{"world"}))
+	want := `[1, hello, 2.1, true, world]`
+	if fmt.Sprintf("%v", c) != want {
+		t.Errorf("c.String() got %v, wanted %v", c, want)
+	}
+}
+
+func TestListIsZeroValue(t *testing.T) {
+	tests := []struct {
+		val         any
+		isZeroValue bool
+	}{
+		{
+			val:         []string{},
+			isZeroValue: true,
+		},
+		{
+			val:         []int{},
+			isZeroValue: true,
+		},
+		{
+			val:         []any{},
+			isZeroValue: true,
+		},
+		{
+			val:         &structpb.ListValue{},
+			isZeroValue: true,
+		},
+		{
+			val:         []ref.Val{},
+			isZeroValue: true,
+		},
+		{
+			val:         DefaultTypeAdapter.NativeToValue([]ref.Val{}).(traits.Lister).Add(DefaultTypeAdapter.NativeToValue([]ref.Val{})),
+			isZeroValue: true,
+		},
+		{
+			val:         []string{""},
+			isZeroValue: false,
+		},
+		{
+			val:         []bool{false},
+			isZeroValue: false,
+		},
+		{
+			val:         []any{0},
+			isZeroValue: false,
+		},
+		{
+			val:         &structpb.ListValue{Values: []*structpb.Value{structpb.NewBoolValue(false)}},
+			isZeroValue: false,
+		},
+		{
+			val:         []ref.Val{Double(0.0)},
+			isZeroValue: false,
+		},
+		{
+			val:         DefaultTypeAdapter.NativeToValue([]ref.Val{IntOne}).(traits.Lister).Add(DefaultTypeAdapter.NativeToValue([]ref.Val{})),
+			isZeroValue: false,
+		},
+	}
+	for i, tst := range tests {
+		tc := tst
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			v := DefaultTypeAdapter.NativeToValue(tc.val)
+			zv, ok := v.(traits.Zeroer)
+			if !ok {
+				t.Fatalf("%v could not be converted to a zero-valuer type", tc.val)
+			}
+			if zv.IsZeroValue() != tc.isZeroValue {
+				t.Errorf("%v.IsZeroValue() got %t, wanted %t", v, zv.IsZeroValue(), tc.isZeroValue)
+			}
+		})
+	}
 }
 
 func TestValueListGet(t *testing.T) {
@@ -184,7 +272,7 @@ func TestValueListGet(t *testing.T) {
 }
 
 func TestBaseListIterator(t *testing.T) {
-	validateIterator123(t, NewDynamicList(newTestRegistry(t), []int32{1, 2, 3}).(traits.Lister))
+	validateIterator123(t, NewDynamicList(newTestRegistry(t), []int32{1, 2, 3}))
 }
 
 func TestValueListValue_Iterator(t *testing.T) {
@@ -194,9 +282,9 @@ func TestValueListValue_Iterator(t *testing.T) {
 func TestBaseListNestedList(t *testing.T) {
 	reg := newTestRegistry(t)
 	listUint32 := []uint32{1, 2}
-	nestedUint32 := NewDynamicList(reg, []interface{}{listUint32})
+	nestedUint32 := NewDynamicList(reg, []any{listUint32})
 	listUint64 := []uint64{1, 2}
-	nestedUint64 := NewDynamicList(reg, []interface{}{listUint64})
+	nestedUint64 := NewDynamicList(reg, []any{listUint64})
 	if nestedUint32.Equal(nestedUint64) != True {
 		t.Error("Could not find nested list")
 	}
@@ -209,7 +297,7 @@ func TestBaseListNestedList(t *testing.T) {
 func TestBaseListSize(t *testing.T) {
 	reg := newTestRegistry(t)
 	listUint32 := []uint32{1, 2}
-	nestedUint32 := NewDynamicList(reg, []interface{}{listUint32})
+	nestedUint32 := NewDynamicList(reg, []any{listUint32})
 	if nestedUint32.Size() != IntOne {
 		t.Error("List indicates the incorrect size.")
 	}
@@ -218,13 +306,26 @@ func TestBaseListSize(t *testing.T) {
 	}
 }
 
+func TestMutableListGet(t *testing.T) {
+	reg := newTestRegistry(t)
+	listA := NewMutableList(reg)
+	listB := NewStringList(reg, []string{"item"})
+	listA = listA.Add(listB).(*mutableList)
+
+	itemVal := listA.Get(Int(0))
+
+	if itemVal.Value().(string) != "item" {
+		t.Error("MutableList get returned invalid item.")
+	}
+}
+
 func TestConcatListAdd(t *testing.T) {
 	reg := newTestRegistry(t)
 	listA := NewDynamicList(reg, []float32{1.0, 2.0})
 	listB := NewStringList(reg, []string{"3"})
 	list := listA.Add(listB).(traits.Lister).Add(listA).
-		Value().([]interface{})
-	expected := []interface{}{
+		Value().([]any)
+	expected := []any{
 		float64(1.0),
 		float64(2.0),
 		string("3"),
@@ -258,7 +359,7 @@ func TestConcatListConvertToNative_Json(t *testing.T) {
 	listA := NewDynamicList(reg, []float32{1.0, 2.0})
 	listB := NewDynamicList(reg, []string{"3"})
 	list := listA.Add(listB)
-	jsonVal, err := list.ConvertToNative(jsonValueType)
+	jsonVal, err := list.ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Fatalf("Got error '%v', expected value", err)
 	}
@@ -267,18 +368,18 @@ func TestConcatListConvertToNative_Json(t *testing.T) {
 		t.Fatalf("protojson.Marshal(%v) failed: %v", jsonVal, err)
 	}
 	jsonTxt := string(jsonBytes)
-	outList := []interface{}{}
+	outList := []any{}
 	err = json.Unmarshal(jsonBytes, &outList)
 	if err != nil {
 		t.Fatalf("json.Unmarshal(%q) failed: %v", jsonTxt, err)
 	}
-	if !reflect.DeepEqual(outList, []interface{}{1.0, 2.0, "3"}) {
-		t.Errorf("got json '%v', expected %v", outList, []interface{}{1.0, 2.0, "3"})
+	if !reflect.DeepEqual(outList, []any{1.0, 2.0, "3"}) {
+		t.Errorf("got json '%v', expected %v", outList, []any{1.0, 2.0, "3"})
 	}
 	// Test proto3 to JSON conversion.
 	listC := NewDynamicList(reg, []*dpb.Duration{{Seconds: 100}})
 	listConcat := listA.Add(listC)
-	jsonVal, err = listConcat.ConvertToNative(jsonValueType)
+	jsonVal, err = listConcat.ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,13 +388,13 @@ func TestConcatListConvertToNative_Json(t *testing.T) {
 		t.Fatalf("protojson.Marshal(%v) failed: %v", jsonVal, err)
 	}
 	jsonTxt = string(jsonBytes)
-	outList = []interface{}{}
+	outList = []any{}
 	err = json.Unmarshal(jsonBytes, &outList)
 	if err != nil {
 		t.Fatalf("json.Unmarshal(%q) failed: %v", jsonTxt, err)
 	}
-	if !reflect.DeepEqual(outList, []interface{}{1.0, 2.0, "100s"}) {
-		t.Errorf("got json '%v', expected %v", outList, []interface{}{1.0, 2.0, "100s"})
+	if !reflect.DeepEqual(outList, []any{1.0, 2.0, "100s"}) {
+		t.Errorf("got json '%v', expected %v", outList, []any{1.0, 2.0, "100s"})
 	}
 }
 
@@ -302,11 +403,11 @@ func TestConcatListConvertToNativeListInterface(t *testing.T) {
 	listA := NewDynamicList(reg, []float32{1.0, 2.0})
 	listB := NewStringList(reg, []string{"3.0"})
 	list := listA.Add(listB)
-	iface, err := list.ConvertToNative(reflect.TypeOf([]interface{}{}))
+	iface, err := list.ConvertToNative(reflect.TypeOf([]any{}))
 	if err != nil {
 		t.Errorf("Got '%v', expected '%v'", err, list)
 	}
-	want := []interface{}{1.0, 2.0, "3.0"}
+	want := []any{1.0, 2.0, "3.0"}
 	if !reflect.DeepEqual(iface, want) {
 		t.Errorf("Got '%v', expected '%v'", iface, want)
 	}
@@ -362,18 +463,18 @@ func TestConcatListEqual(t *testing.T) {
 	listB := NewDynamicList(reg, []float64{3.0})
 	list := listA.Add(listB)
 	// Note the internal type of list raw and concat list are slightly different.
-	listRaw := NewDynamicList(reg, []interface{}{float32(1.0), float64(2.0), float64(3.0)})
+	listRaw := NewDynamicList(reg, []any{float32(1.0), float64(2.0), float64(3.0)})
 	if listRaw.Equal(list) != True || list.Equal(listRaw) != True {
 		t.Errorf("listRaw.Equal(list) not true, got '%v', expected '%v'", list.Value(), listRaw.Value())
 	}
 	if list.Equal(listA) == True || listRaw.Equal(listA) == True {
 		t.Error("lists of unequal length considered equal")
 	}
-	listC := reg.NativeToValue([]interface{}{1.0, 3.0, 2.0})
+	listC := reg.NativeToValue([]any{1.0, 3.0, 2.0})
 	if list.Equal(listC) != False {
 		t.Errorf("list.Equal(listC) got %v, wanted false", list.Equal(listC))
 	}
-	listD := reg.NativeToValue([]interface{}{1, 2.0, 3.0})
+	listD := reg.NativeToValue([]any{1, 2.0, 3.0})
 	if list.Equal(listD) != True {
 		t.Errorf("list.Equal(listD) got %v, wanted true", list.Equal(listD))
 	}
@@ -444,8 +545,8 @@ func TestStringListAdd_Heterogenous(t *testing.T) {
 	reg := newTestRegistry(t)
 	listA := NewStringList(reg, []string{"hello"})
 	listB := NewDynamicList(reg, []int32{1, 2, 3})
-	list := listA.Add(listB).(traits.Lister).Value().([]interface{})
-	expected := []interface{}{"hello", int64(1), int64(2), int64(3)}
+	list := listA.Add(listB).(traits.Lister).Value().([]any)
+	expected := []any{"hello", int64(1), int64(2), int64(3)}
 	if len(list) != len(expected) {
 		t.Errorf("Unexpected list size. Got '%d', expected 4", len(list))
 	}
@@ -487,13 +588,13 @@ func TestStringListConvertToNative(t *testing.T) {
 func TestStringListConvertToNative_ListInterface(t *testing.T) {
 	reg := newTestRegistry(t)
 	list := NewStringList(reg, []string{"h", "e", "l", "p"})
-	val, err := list.ConvertToNative(reflect.TypeOf([]interface{}{}))
+	val, err := list.ConvertToNative(reflect.TypeOf([]any{}))
 	if err != nil {
 		t.Error("Unable to convert string list to itself.")
 	}
-	want := []interface{}{"h", "e", "l", "p"}
-	if !reflect.DeepEqual(val.([]interface{}), want) {
-		for i, e := range val.([]interface{}) {
+	want := []any{"h", "e", "l", "p"}
+	if !reflect.DeepEqual(val.([]any), want) {
+		for i, e := range val.([]any) {
 			t.Logf("val[%d] %v(%T)", i, e, e)
 		}
 		for i, e := range want {
@@ -506,7 +607,7 @@ func TestStringListConvertToNative_ListInterface(t *testing.T) {
 func TestStringListConvertToNative_Error(t *testing.T) {
 	reg := newTestRegistry(t)
 	list := NewStringList(reg, []string{"h", "e", "l", "p"})
-	_, err := list.ConvertToNative(jsonStructType)
+	_, err := list.ConvertToNative(JSONStructType)
 	if err == nil {
 		t.Error("Conversion of list to unsupported type did not error.")
 	}
@@ -515,7 +616,7 @@ func TestStringListConvertToNative_Error(t *testing.T) {
 func TestStringListConvertToNative_Json(t *testing.T) {
 	reg := newTestRegistry(t)
 	list := NewStringList(reg, []string{"h", "e", "l", "p"})
-	jsonVal, err := list.ConvertToNative(jsonValueType)
+	jsonVal, err := list.ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Errorf("Got '%v', expected '%v'", err, jsonVal)
 	}
@@ -524,16 +625,16 @@ func TestStringListConvertToNative_Json(t *testing.T) {
 		t.Fatalf("protojson.Marshal(%v) failed: %v", jsonVal, err)
 	}
 	jsonTxt := string(jsonBytes)
-	outList := []interface{}{}
+	outList := []any{}
 	err = json.Unmarshal(jsonBytes, &outList)
 	if err != nil {
 		t.Fatalf("json.Unmarshal(%q) failed: %v", jsonTxt, err)
 	}
-	if !reflect.DeepEqual(outList, []interface{}{"h", "e", "l", "p"}) {
+	if !reflect.DeepEqual(outList, []any{"h", "e", "l", "p"}) {
 		t.Errorf("got json '%v', expected %v", jsonTxt, outList)
 	}
 
-	jsonList, err := list.ConvertToNative(jsonListValueType)
+	jsonList, err := list.ConvertToNative(JSONListType)
 	if err != nil {
 		t.Errorf("Got '%v', expected '%v'", err, jsonList)
 	}
@@ -580,7 +681,7 @@ func TestValueListAdd(t *testing.T) {
 func TestValueListConvertToNative_Json(t *testing.T) {
 	reg := newTestRegistry(t)
 	list := NewRefValList(reg, []ref.Val{String("hello"), String("world")})
-	jsonVal, err := list.ConvertToNative(jsonListValueType)
+	jsonVal, err := list.ConvertToNative(JSONListType)
 	if err != nil {
 		t.Errorf("Got '%v', expected '%v'", err, jsonVal)
 	}
@@ -589,17 +690,181 @@ func TestValueListConvertToNative_Json(t *testing.T) {
 		t.Fatalf("protojson.Marshal(%v) failed: %v", jsonVal, err)
 	}
 	jsonTxt := string(jsonBytes)
-	outList := []interface{}{}
+	outList := []any{}
 	err = json.Unmarshal(jsonBytes, &outList)
 	if err != nil {
 		t.Fatalf("json.Unmarshal(%q) failed: %v", jsonTxt, err)
 	}
-	if !reflect.DeepEqual(outList, []interface{}{"hello", "world"}) {
+	if !reflect.DeepEqual(outList, []any{"hello", "world"}) {
 		t.Errorf("got json '%v', expected %v", jsonTxt, outList)
 	}
 }
 
-func getElem(t *testing.T, list traits.Indexer, index ref.Val) interface{} {
+func TestMutableList(t *testing.T) {
+	l := NewMutableList(DefaultTypeAdapter)
+	l.Add(NewRefValList(DefaultTypeAdapter, []ref.Val{String("hello")}))
+	l.Add(NewRefValList(DefaultTypeAdapter, []ref.Val{String("world")}))
+	il := l.ToImmutableList()
+	if il.Size() != Int(2) {
+		t.Errorf("il.Size() got %d, wanted size 2", il.Size())
+	}
+	l.Add(NewRefValList(DefaultTypeAdapter, []ref.Val{String("!")}))
+	if il.Size() != Int(2) {
+		t.Errorf("il.Size() got %d, wanted size 2", il.Size())
+	}
+}
+
+func TestListFold(t *testing.T) {
+
+	tests := []struct {
+		l         any
+		folds     int
+		foldLimit int
+	}{
+		{
+			l:         []string{"hello", "world"},
+			folds:     2,
+			foldLimit: 2,
+		},
+		{
+			l:         []string{"hello", "world"},
+			folds:     1,
+			foldLimit: 1,
+		},
+		{
+			l:         []string{"hello"},
+			folds:     1,
+			foldLimit: 2,
+		},
+		{
+			l:         []ref.Val{},
+			folds:     0,
+			foldLimit: 20,
+		},
+		{
+			l: []ref.Val{
+				String("hello"),
+				String("world"),
+				String("goodbye"),
+				String("cruel world"),
+			},
+			folds:     1,
+			foldLimit: 1,
+		},
+		{
+			l: []ref.Val{
+				String("hello"),
+				String("world"),
+				String("goodbye"),
+				String("cruel world"),
+			},
+			folds:     4,
+			foldLimit: 10,
+		},
+		{
+			l: DefaultTypeAdapter.NativeToValue([]ref.Val{
+				String("hello"),
+				String("world"),
+			}).(traits.Lister).Add(DefaultTypeAdapter.NativeToValue([]ref.Val{
+				String("goodbye"),
+				String("cruel world"),
+			})),
+			folds:     4,
+			foldLimit: 10,
+		},
+		{
+			l: DefaultTypeAdapter.NativeToValue([]ref.Val{
+				String("hello"),
+				String("world"),
+			}).(traits.Lister).Add(DefaultTypeAdapter.NativeToValue([]ref.Val{
+				String("goodbye"),
+				String("cruel world"),
+			})),
+			folds:     3,
+			foldLimit: 3,
+		},
+	}
+	reg := NewEmptyRegistry()
+	for i, tst := range tests {
+		tc := tst
+		l := reg.NativeToValue(tc.l).(traits.Lister)
+		foldKinds := map[string]traits.Foldable{
+			"modern": ToFoldableList(l),
+			"legacy": ToFoldableList(proxyLegacyList{proxy: l}),
+		}
+		for foldKind, foldable := range foldKinds {
+			t.Run(fmt.Sprintf("[%d]%s", i, foldKind), func(t *testing.T) {
+				f := &testListFolder{foldLimit: tc.foldLimit}
+				foldable.Fold(f)
+				if f.folds != tc.folds {
+					t.Errorf("m.Fold(f) got %d, wanted %d folds", f.folds, tc.folds)
+				}
+			})
+		}
+	}
+}
+
+type testListFolder struct {
+	foldLimit int
+	folds     int
+}
+
+func (f *testListFolder) FoldEntry(k, v any) bool {
+	if f.foldLimit != 0 {
+		if f.folds >= f.foldLimit {
+			return false
+		}
+	}
+	f.folds++
+	return true
+}
+
+// proxyLegacyList omits the foldable interfaces associated with all core Lister implementations
+type proxyLegacyList struct {
+	proxy traits.Lister
+}
+
+func (m proxyLegacyList) ConvertToNative(typeDesc reflect.Type) (any, error) {
+	return m.proxy.ConvertToNative(typeDesc)
+}
+
+func (m proxyLegacyList) ConvertToType(typeValue ref.Type) ref.Val {
+	return m.proxy.ConvertToType(typeValue)
+}
+
+func (m proxyLegacyList) Equal(other ref.Val) ref.Val {
+	return m.proxy.Equal(other)
+}
+
+func (m proxyLegacyList) Type() ref.Type {
+	return m.proxy.Type()
+}
+
+func (m proxyLegacyList) Value() any {
+	return m.proxy.Value()
+}
+
+func (m proxyLegacyList) Add(other ref.Val) ref.Val {
+	return m.proxy.Add(other)
+}
+
+func (m proxyLegacyList) Contains(value ref.Val) ref.Val {
+	return m.proxy.Contains(value)
+}
+
+func (m proxyLegacyList) Get(index ref.Val) ref.Val {
+	return m.proxy.Get(index)
+}
+
+func (m proxyLegacyList) Iterator() traits.Iterator {
+	return m.proxy.Iterator()
+}
+
+func (m proxyLegacyList) Size() ref.Val {
+	return m.proxy.Size()
+}
+
+func getElem(t *testing.T, list traits.Indexer, index ref.Val) any {
 	t.Helper()
 	val := list.Get(index)
 	if IsError(val) {

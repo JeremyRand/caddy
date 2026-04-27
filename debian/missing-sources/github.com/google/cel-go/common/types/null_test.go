@@ -15,46 +15,87 @@
 package types
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 
+	proto3pb "github.com/google/cel-go/test/proto3pb"
+	dynamicpb "google.golang.org/protobuf/types/dynamicpb"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestNullConvertToNative(t *testing.T) {
-	expected := structpb.NewNullValue()
-	// Json Value
-	val, err := NullValue.ConvertToNative(jsonValueType)
-	if err != nil {
-		t.Error("Fail to convert Null to jsonValueType")
-	}
-	if !proto.Equal(expected, val.(proto.Message)) {
-		t.Errorf("Messages were not equal, got '%v'", val)
+	tests := []struct {
+		goType reflect.Type
+		out    any
+		err    error
+	}{
+		{
+			goType: JSONValueType,
+			out:    structpb.NewNullValue(),
+		},
+		{
+			goType: JSONNullType,
+			out:    structpb.NullValue_NULL_VALUE,
+		},
+		{
+			goType: anyValueType,
+			out:    testPackAny(t, structpb.NewNullValue()),
+		},
+		{
+			goType: reflect.TypeOf(NullValue),
+			out:    NullValue,
+		},
+		{goType: boolWrapperType},
+		{goType: byteWrapperType},
+		{goType: doubleWrapperType},
+		{goType: floatWrapperType},
+		{goType: int32WrapperType},
+		{goType: int64WrapperType},
+		{goType: stringWrapperType},
+		{goType: uint32WrapperType},
+		{goType: uint64WrapperType},
+		{goType: durationValueType},
+		{goType: timestampValueType},
+		{goType: reflect.TypeOf((*dynamicpb.Message)(nil))},
+		{goType: reflect.TypeOf(&proto3pb.TestAllTypes{})},
+		{goType: reflect.TypeOf((*proto3pb.TestAllTypes)(nil))},
+		{
+			goType: reflect.TypeOf(1),
+			err:    errors.New("type conversion error from 'null_type' to 'int'"),
+		},
+		{
+			goType: JSONListType,
+			err:    errors.New("type conversion error from 'null_type' to '*structpb.ListValue'"),
+		},
+		{
+			goType: JSONStructType,
+			err:    errors.New("type conversion error from 'null_type' to '*structpb.Struct'"),
+		},
 	}
 
-	// google.protobuf.Any
-	val, err = NullValue.ConvertToNative(anyValueType)
-	if err != nil {
-		t.Fatalf("NullValue.ConvertToNative(%v) failed: %v", anyValueType, err)
-	}
-	data, err := val.(*anypb.Any).UnmarshalNew()
-	if err != nil {
-		t.Fatalf("val.UnmarshalNew() failed: %v", err)
-	}
-	if !proto.Equal(expected, data) {
-		t.Errorf("Messages were not equal, got '%v'", data)
-	}
-
-	// NullValue
-	val, err = NullValue.ConvertToNative(reflect.TypeOf(structpb.NullValue_NULL_VALUE))
-	if err != nil {
-		t.Error("Fail to convert Null to strcutpb.NullValue")
-	}
-	if val != structpb.NullValue_NULL_VALUE {
-		t.Errorf("Messages were not equal, got '%v'", val)
+	for i, tst := range tests {
+		tc := tst
+		t.Run(fmt.Sprintf("[%d]", i), func(t *testing.T) {
+			out, err := NullValue.ConvertToNative(tc.goType)
+			if err != nil {
+				if tc.err == nil {
+					t.Fatalf("NullValue.ConvertToType(%v) failed: %v", tc.goType, err)
+				}
+				if tc.err.Error() != err.Error() {
+					t.Errorf("NullValue.ConvertToType(%v) got error %v, wanted error %v", tc.goType, err, tc.err)
+				}
+				return
+			}
+			pbMsg, isPB := out.(proto.Message)
+			if (isPB && !proto.Equal(pbMsg, tc.out.(proto.Message))) || (!isPB && out != tc.out) {
+				t.Errorf("NullValue.ConvertToNative(%v) got %v, wanted %v", tc.goType, pbMsg, tc.out)
+			}
+		})
 	}
 }
 
@@ -77,6 +118,12 @@ func TestNullEqual(t *testing.T) {
 	}
 }
 
+func TestNullIsZeroValue(t *testing.T) {
+	if !NullValue.IsZeroValue() {
+		t.Error("NullValue.IsZeroValue() returned false, wanted true")
+	}
+}
+
 func TestNullType(t *testing.T) {
 	if NullValue.Type() != NullType {
 		t.Error("NullValue gets incorrect type.")
@@ -87,4 +134,13 @@ func TestNullValue(t *testing.T) {
 	if NullValue.Value() != structpb.NullValue_NULL_VALUE {
 		t.Error("NullValue gets incorrect value.")
 	}
+}
+
+func testPackAny(t *testing.T, val proto.Message) *anypb.Any {
+	t.Helper()
+	out, err := anypb.New(val)
+	if err != nil {
+		t.Fatalf("anypb.New(%v) failed: %v", val, err)
+	}
+	return out
 }

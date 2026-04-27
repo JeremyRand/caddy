@@ -20,9 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/google/cel-go/common/overloads"
 	"github.com/google/cel-go/common/types/ref"
-	"google.golang.org/protobuf/proto"
 
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	dpb "google.golang.org/protobuf/types/known/durationpb"
@@ -39,7 +40,7 @@ func TestDurationOperators(t *testing.T) {
 	tests := []struct {
 		name string
 		op   func() ref.Val
-		out  interface{}
+		out  any
 	}{
 		// Addition tests.
 		{
@@ -165,7 +166,7 @@ func TestDurationConvertToNative_Any(t *testing.T) {
 }
 
 func TestDurationConvertToNative_Error(t *testing.T) {
-	val, err := Duration{Duration: duration(7506, 1000)}.ConvertToNative(jsonValueType)
+	val, err := Duration{Duration: duration(7506, 1000)}.ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Errorf("Got error: '%v', expected value", err)
 	}
@@ -177,7 +178,7 @@ func TestDurationConvertToNative_Error(t *testing.T) {
 }
 
 func TestDurationConvertToNative_Json(t *testing.T) {
-	val, err := Duration{Duration: duration(7506, 1000)}.ConvertToNative(jsonValueType)
+	val, err := Duration{Duration: duration(7506, 1000)}.ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Error(err)
 	}
@@ -251,6 +252,15 @@ func TestDurationGetMilliseconds(t *testing.T) {
 	sec := d.Receive(overloads.TimeGetMilliseconds, overloads.DurationToMilliseconds, []ref.Val{})
 	if !sec.Equal(Int(7506000)).(Bool) {
 		t.Error("Expected 6 seconds, got", sec)
+	}
+}
+
+func TestDurationIsZeroValue(t *testing.T) {
+	if (&Duration{Duration: time.Duration(1)}).IsZeroValue() {
+		t.Error("Duration(1).IsZeroValue() returned true, wanted false.")
+	}
+	if !(&Duration{Duration: time.Duration(0)}).IsZeroValue() {
+		t.Error("Duration(0).IsZeroValue() returned false, wanted true")
 	}
 }
 

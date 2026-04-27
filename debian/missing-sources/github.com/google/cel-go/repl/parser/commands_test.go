@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	antlr "github.com/antlr4-go/antlr/v4"
 )
 
 type errListener struct {
@@ -27,7 +27,7 @@ type errListener struct {
 	errs []error
 }
 
-func (l *errListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
+func (l *errListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol any, line, column int, msg string, e antlr.RecognitionException) {
 	l.errs = append(l.errs, fmt.Errorf("(%d:%d) %s", line, column, msg))
 }
 
@@ -60,13 +60,14 @@ func TestAccept(t *testing.T) {
 		"%exit",
 		"%let id = 2",
 		"%arbitrary",
-		"%arbitrary --flag -alt_flag 'string arg'",
+		"%arbitrary --flag --another-flag 'string arg'",
 		" ",
 		"%let y : int = [1, 2, 3]",
 		"%let fn (y : int) : int -> y + 10",
 		"%let fn () : int -> 10",
 		"%let fn (x:int, y : int) : int -> x + y",
 		"%let fn (x:int, y : int) : int -> x + y",
+		"%let x : Abstract() = MakeAbstract()",
 		"%let com.google.fn (x:int, y : int) : int -> x + y",
 		"%let int.plus (x: int) : int -> this + x",
 		"%delete id",

@@ -29,10 +29,7 @@ func TestEncoders(t *testing.T) {
 		parseOnly bool
 	}{
 		{expr: "base64.decode('aGVsbG8=') == b'hello'"},
-		{
-			expr: "base64.decode('aGVsbG8') == b'error'",
-			err:  "illegal base64 data at input byte 4",
-		},
+		{expr: "base64.decode('aGVsbG8') == b'hello'"},
 		{
 			expr:      "base64.decode(b'aGVsbG8=') == b'hello'",
 			err:       "no such overload",
@@ -48,44 +45,51 @@ func TestEncoders(t *testing.T) {
 
 	env, err := cel.NewEnv(Encoders())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("cel.NewEnv(Encoders()) failed: %v", err)
 	}
 	for i, tst := range tests {
 		tc := tst
-		t.Run(fmt.Sprintf("[%d]", i), func(tt *testing.T) {
+		t.Run(fmt.Sprintf("[%d]", i), func(t *testing.T) {
 			var asts []*cel.Ast
 			pAst, iss := env.Parse(tc.expr)
 			if iss.Err() != nil {
-				tt.Fatal(iss.Err())
+				t.Fatalf("env.Parse(%v) failed: %v", tc.expr, iss.Err())
 			}
 			asts = append(asts, pAst)
 			if !tc.parseOnly {
 				cAst, iss := env.Check(pAst)
 				if iss.Err() != nil {
-					tt.Fatal(iss.Err())
+					t.Fatalf("env.Check(%v) failed: %v", tc.expr, iss.Err())
 				}
 				asts = append(asts, cAst)
 			}
 			for _, ast := range asts {
 				prg, err := env.Program(ast)
 				if err != nil {
-					tt.Fatal(err)
+					t.Fatal(err)
 				}
 				out, _, err := prg.Eval(cel.NoVars())
 				if tc.err != "" {
 					if err == nil {
-						tt.Fatalf("got %v, wanted error %s for expr: %s",
+						t.Fatalf("got %v, wanted error %s for expr: %s",
 							out.Value(), tc.err, tc.expr)
 					}
 					if !strings.Contains(err.Error(), tc.err) {
-						tt.Errorf("got error %v, wanted error %s for expr: %s", err, tc.err, tc.expr)
+						t.Errorf("got error %v, wanted error %s for expr: %s", err, tc.err, tc.expr)
 					}
 				} else if err != nil {
-					tt.Fatal(err)
+					t.Fatal(err)
 				} else if out.Value() != true {
-					tt.Errorf("got %v, wanted true for expr: %s", out.Value(), tc.expr)
+					t.Errorf("got %v, wanted true for expr: %s", out.Value(), tc.expr)
 				}
 			}
 		})
+	}
+}
+
+func TestEncodersVersion(t *testing.T) {
+	_, err := cel.NewEnv(Encoders(EncodersVersion(0)))
+	if err != nil {
+		t.Fatalf("EncodersVersion(0) failed: %v", err)
 	}
 }

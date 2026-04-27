@@ -17,12 +17,64 @@ package pb
 import (
 	"testing"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/google/cel-go/checker/decls"
+
+	proto2pb "github.com/google/cel-go/test/proto2pb"
 	proto3pb "github.com/google/cel-go/test/proto3pb"
+	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	descpb "google.golang.org/protobuf/types/descriptorpb"
 )
+
+func TestFileDescriptionGetExtensions(t *testing.T) {
+	pbdb := NewDb()
+	registerFileDescriptor(t, pbdb, &proto2pb.TestAllTypes{})
+	registerFileDescriptor(t, pbdb, &proto2pb.ExternalMessageType{})
+	ex, found := pbdb.DescribeType("google.expr.proto2.test.ExampleType")
+	if !found {
+		t.Fatal("ExampleType not found")
+	}
+	tests := []struct {
+		field     string
+		fieldType *exprpb.Type
+	}{
+		{
+			field:     "google.expr.proto2.test.nested_example",
+			fieldType: decls.NewObjectType("google.expr.proto2.test.ExampleType"),
+		},
+		{
+			field:     "google.expr.proto2.test.int32_ext",
+			fieldType: decls.Int,
+		},
+		{
+			field:     "google.expr.proto2.test.ExtendedExampleType.extended_examples",
+			fieldType: decls.NewListType(decls.String),
+		},
+		{
+			field:     "google.expr.proto2.test.ExtendedExampleType.enum_ext",
+			fieldType: decls.Int,
+		},
+		{
+			field:     "google.expr.proto2.test.ExternalMessageType.int64_ext",
+			fieldType: decls.Int,
+		},
+	}
+	for _, tst := range tests {
+		tc := tst
+		t.Run(tc.field, func(t *testing.T) {
+			field, found := ex.FieldByName(tc.field)
+			if !found {
+				t.Fatalf("%s extension not found", tc.field)
+			}
+			if !proto.Equal(field.CheckedType(), tc.fieldType) {
+				t.Errorf("Got %v, wanted %v", field.CheckedType(), tc.fieldType)
+			}
+		})
+	}
+}
 
 func TestFileDescriptionGetTypes(t *testing.T) {
 	pbdb := NewDb()
@@ -129,5 +181,13 @@ func TestFileDescriptionGetImportedEnumNames(t *testing.T) {
 		if ed.Value() != value {
 			t.Errorf("Got %v, wanted %v for enum %s", ed, value, enumName)
 		}
+	}
+}
+
+func registerFileDescriptor(t *testing.T, pbdb *Db, pbMsg proto.Message) {
+	fileDesc := pbMsg.ProtoReflect().Descriptor().ParentFile()
+	_, err := pbdb.RegisterDescriptor(fileDesc)
+	if err != nil {
+		t.Fatalf("pbdb.RegisterDescriptor(%v) failed: %v", fileDesc, err)
 	}
 }

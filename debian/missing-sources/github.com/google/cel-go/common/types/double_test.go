@@ -21,9 +21,10 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
-	"google.golang.org/protobuf/proto"
 
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -170,7 +171,7 @@ func TestDoubleConvertToNative_Float64(t *testing.T) {
 }
 
 func TestDoubleConvertToNative_Json(t *testing.T) {
-	val, err := Double(-1.4).ConvertToNative(jsonValueType)
+	val, err := Double(-1.4).ConvertToNative(JSONValueType)
 	pbVal := structpb.NewNumberValue(-1.4)
 	if err != nil {
 		t.Error(err)
@@ -178,7 +179,7 @@ func TestDoubleConvertToNative_Json(t *testing.T) {
 		t.Errorf("Got '%v', expected -1.4", val)
 	}
 
-	val, err = Double(math.NaN()).ConvertToNative(jsonValueType)
+	val, err = Double(math.NaN()).ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -188,14 +189,14 @@ func TestDoubleConvertToNative_Json(t *testing.T) {
 		}
 	}
 
-	val, err = Double(math.Inf(-1)).ConvertToNative(jsonValueType)
+	val, err = Double(math.Inf(-1)).ConvertToNative(JSONValueType)
 	pbVal = structpb.NewNumberValue(math.Inf(-1))
 	if err != nil {
 		t.Error(err)
 	} else if !proto.Equal(val.(proto.Message), pbVal) {
 		t.Errorf("Got '%v', expected -Infinity", val)
 	}
-	val, err = Double(math.Inf(0)).ConvertToNative(jsonValueType)
+	val, err = Double(math.Inf(0)).ConvertToNative(JSONValueType)
 	pbVal = structpb.NewNumberValue(math.Inf(0))
 	if err != nil {
 		t.Error(err)
@@ -249,7 +250,7 @@ func TestDoubleConvertToType(t *testing.T) {
 		name   string
 		in     float64
 		toType ref.Type
-		out    interface{}
+		out    any
 	}{
 		{
 			name:   "DoubleToDouble",
@@ -412,6 +413,21 @@ func TestDoubleEqual(t *testing.T) {
 		if !reflect.DeepEqual(got, tc.out) {
 			t.Errorf("%v.Equal(%v) got %v, wanted %v", tc.a, tc.b, got, tc.out)
 		}
+	}
+}
+
+func TestDoubleIsZeroValue(t *testing.T) {
+	if Double(math.Inf(1)).IsZeroValue() {
+		t.Error("Double(+infinity).IsZeroValue() returned true, wanted false.")
+	}
+	if Double(math.Inf(-1)).IsZeroValue() {
+		t.Error("Double(-infinity).IsZeroValue() returned true, wanted false.")
+	}
+	if Double(math.NaN()).IsZeroValue() {
+		t.Error("Double(NaN).IsZeroValue() returned true, wanted false.")
+	}
+	if !Double(0.0).IsZeroValue() {
+		t.Error("Double(0.0).IsZeroValue() returned false, wanted true")
 	}
 }
 

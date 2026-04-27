@@ -19,10 +19,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	anypb "google.golang.org/protobuf/types/known/anypb"
@@ -96,23 +97,23 @@ func TestProtoObjectConvertToNative(t *testing.T) {
 	}
 
 	// JSON
-	jsonVal, err := objVal.ConvertToNative(jsonValueType)
+	jsonVal, err := objVal.ConvertToNative(JSONValueType)
 	if err != nil {
-		t.Fatalf("objVal.ConvertToNative(%v) failed: %v", jsonValueType, err)
+		t.Fatalf("objVal.ConvertToNative(%v) failed: %v", JSONValueType, err)
 	}
 	jsonBytes, err := protojson.Marshal(jsonVal.(proto.Message))
 	jsonTxt := string(jsonBytes)
 	if err != nil {
 		t.Fatalf("protojson.Marshal(%v) failed: %v", jsonVal, err)
 	}
-	outMap := map[string]interface{}{}
+	outMap := map[string]any{}
 	err = json.Unmarshal(jsonBytes, &outMap)
 	if err != nil {
 		t.Fatalf("json.Unmarshal(%q) failed: %v", jsonTxt, err)
 	}
-	want := map[string]interface{}{
-		"sourceInfo": map[string]interface{}{
-			"lineOffsets": []interface{}{1.0, 2.0, 3.0},
+	want := map[string]any{
+		"sourceInfo": map[string]any{
+			"lineOffsets": []any{1.0, 2.0, 3.0},
 		},
 	}
 	if !reflect.DeepEqual(outMap, want) {
@@ -139,6 +140,23 @@ func TestProtoObjectIsSet(t *testing.T) {
 	}
 	if !IsError(objVal.IsSet(IntZero)) {
 		t.Error("got field '0' wanted error")
+	}
+}
+
+func TestProtoObjectIsZeroValue(t *testing.T) {
+	reg := newTestRegistry(t, &exprpb.ParsedExpr{})
+	emptyObj := reg.NativeToValue(&exprpb.ParsedExpr{})
+	pb, ok := emptyObj.(traits.Zeroer)
+	if !ok {
+		t.Fatal("Proto object is not a traits.Zeroer")
+	}
+	if !pb.IsZeroValue() {
+		t.Error("pb.IsZeroValue() got false, wanted true")
+	}
+	obj := reg.NativeToValue(&exprpb.Expr{ExprKind: &exprpb.Expr_CallExpr{}})
+	pb = obj.(traits.Zeroer)
+	if pb.IsZeroValue() {
+		t.Error("pb.IsZeroValue() got true, wanted false")
 	}
 }
 
@@ -172,7 +190,7 @@ func TestProtoObjectConvertToType(t *testing.T) {
 	}
 	reg := newTestRegistry(t, msg)
 	objVal := reg.NativeToValue(msg)
-	tv := objVal.Type().(*TypeValue)
+	tv := objVal.Type().(ref.Val)
 	if objVal.ConvertToType(TypeType).Equal(tv) != True {
 		t.Errorf("got non-type value: %v, wanted objet type", objVal.ConvertToType(TypeType))
 	}

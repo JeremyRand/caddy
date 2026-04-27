@@ -23,7 +23,7 @@ import (
 )
 
 func TestActivation(t *testing.T) {
-	act, err := NewActivation(map[string]interface{}{"a": types.True})
+	act, err := NewActivation(map[string]any{"a": types.True})
 	if err != nil {
 		t.Fatalf("Got err: %v, wanted activation", err)
 	}
@@ -38,7 +38,7 @@ func TestActivation(t *testing.T) {
 }
 
 func TestActivation_Resolve(t *testing.T) {
-	activation, _ := NewActivation(map[string]interface{}{"a": types.True})
+	activation, _ := NewActivation(map[string]any{"a": types.True})
 	if val, found := activation.ResolveName("a"); !found || val != types.True {
 		t.Error("Activation failed to resolve 'a'")
 	}
@@ -52,7 +52,26 @@ func TestActivation_ResolveLazy(t *testing.T) {
 		}
 		return v
 	}
-	a, _ := NewActivation(map[string]interface{}{
+	a, _ := NewActivation(map[string]any{
+		"now": now,
+	})
+	first, _ := a.ResolveName("now")
+	second, _ := a.ResolveName("now")
+	if first != second {
+		t.Errorf("Got different second, "+
+			"expected same as first: 1:%v 2:%v", first, second)
+	}
+}
+
+func TestActivation_ResolveLazyAny(t *testing.T) {
+	var v any
+	now := func() any {
+		if v == nil {
+			v = time.Now().Unix()
+		}
+		return v
+	}
+	a, _ := NewActivation(map[string]any{
 		"now": now,
 	})
 	first, _ := a.ResolveName("now")
@@ -65,12 +84,12 @@ func TestActivation_ResolveLazy(t *testing.T) {
 
 func TestHierarchicalActivation(t *testing.T) {
 	// compose a parent with more properties than the child
-	parent, _ := NewActivation(map[string]interface{}{
+	parent, _ := NewActivation(map[string]any{
 		"a": types.String("world"),
 		"b": types.Int(-42),
 	})
 	// compose the child such that it shadows the parent
-	child, _ := NewActivation(map[string]interface{}{
+	child, _ := NewActivation(map[string]any{
 		"a": types.True,
 		"c": types.String("universe"),
 	})
@@ -87,5 +106,27 @@ func TestHierarchicalActivation(t *testing.T) {
 	// Resolve the child only value.
 	if val, found := combined.ResolveName("c"); !found || val.(types.String) != "universe" {
 		t.Error("Activation failed to resolve child value of 'c'")
+	}
+}
+
+func TestAsPartialActivation(t *testing.T) {
+	// compose a parent with more properties than the child
+	parent, _ := NewPartialActivation(map[string]any{
+		"a": types.String("world"),
+		"b": types.Int(-42),
+	}, NewAttributePattern("c"))
+	// compose the child such that it shadows the parent
+	child, _ := NewActivation(map[string]any{
+		"d": types.String("universe"),
+	})
+	combined := NewHierarchicalActivation(parent, child)
+
+	// Resolve the shadowed child value.
+	if part, found := AsPartialActivation(combined); found {
+		if part != parent {
+			t.Errorf("AsPartialActivation() got %v, wanted %v", part, parent)
+		}
+	} else {
+		t.Error("AsPartialActivation() failed, did not find parent partial activation")
 	}
 }

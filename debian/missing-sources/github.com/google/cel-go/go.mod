@@ -1,12 +1,17 @@
 module github.com/google/cel-go
 
-go 1.17
+go 1.23.0
 
 require (
-	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20220418222510-f25a4f6275ed
-	github.com/golang/protobuf v1.5.2
-	github.com/stoewer/go-strcase v1.2.0
-	golang.org/x/text v0.3.7
-	google.golang.org/genproto v0.0.0-20220502173005-c8bf987b8c21
-	google.golang.org/protobuf v1.28.0
+	cel.dev/expr v0.25.1
+	github.com/antlr4-go/antlr/v4 v4.13.1
+	go.yaml.in/yaml/v3 v3.0.4
+	google.golang.org/genproto/googleapis/api v0.0.0-20240826202546-f6391c0de4c7
+	google.golang.org/protobuf v1.36.10
+)
+
+require (
+	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
+	golang.org/x/text v0.22.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240826202546-f6391c0de4c7 // indirect
 )

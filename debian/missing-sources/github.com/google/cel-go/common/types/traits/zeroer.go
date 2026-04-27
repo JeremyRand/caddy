@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2022 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package interpreter
+package traits
 
-import "math"
-
-// TODO: remove Coster.
-
-// Coster calculates the heuristic cost incurred during evaluation.
-// Deprecated: Please migrate cel.EstimateCost, it supports length estimates for input data and cost estimates for
-// extension functions.
-type Coster interface {
-	Cost() (min, max int64)
-}
-
-// estimateCost returns the heuristic cost interval for the program.
-func estimateCost(i interface{}) (min, max int64) {
-	c, ok := i.(Coster)
-	if !ok {
-		return 0, math.MaxInt64
-	}
-	return c.Cost()
+// Zeroer interface for testing whether a CEL value is a zero value for its type.
+type Zeroer interface {
+	// IsZeroValue indicates whether the object is the zero value for the type.
+	IsZeroValue() bool
 }

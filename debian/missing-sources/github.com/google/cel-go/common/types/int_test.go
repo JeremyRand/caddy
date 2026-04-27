@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
-	"google.golang.org/protobuf/proto"
 
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -38,17 +39,17 @@ func TestIntAdd(t *testing.T) {
 	if !IsError(Int(-1).Add(String("-1"))) {
 		t.Error("Adding non-int to int was not an error.")
 	}
-	if lhs, rhs := math.MaxInt64, 1; !IsError(Int(lhs).Add(Int(rhs))) {
+	if lhs, rhs := int64(math.MaxInt64), int64(1); !IsError(Int(lhs).Add(Int(rhs))) {
 		t.Errorf("Expected adding %d and %d to result in overflow.", lhs, rhs)
 	}
-	if lhs, rhs := math.MinInt64, -1; !IsError(Int(lhs).Add(Int(rhs))) {
+	if lhs, rhs := int64(math.MinInt64), int64(-1); !IsError(Int(lhs).Add(Int(rhs))) {
 		t.Errorf("Expected adding %d and %d to result in overflow.", lhs, rhs)
 	}
-	if lhs, rhs := math.MaxInt64-1, 1; !Int(lhs).Add(Int(rhs)).Equal(Int(math.MaxInt64)).(Bool) {
-		t.Errorf("Expected adding %d and %d to yield %d", lhs, rhs, math.MaxInt64)
+	if lhs, rhs := int64(math.MaxInt64-1), int64(1); !Int(lhs).Add(Int(rhs)).Equal(Int(int64(math.MaxInt64))).(Bool) {
+		t.Errorf("Expected adding %d and %d to yield %d", lhs, rhs, int64(math.MaxInt64))
 	}
-	if lhs, rhs := math.MinInt64+1, -1; !Int(lhs).Add(Int(rhs)).Equal(Int(math.MinInt64)).(Bool) {
-		t.Errorf("Expected adding %d and %d to yield %d", lhs, rhs, math.MaxInt64)
+	if lhs, rhs := int64(math.MinInt64+1), int64(-1); !Int(lhs).Add(Int(rhs)).Equal(Int(int64(math.MinInt64))).(Bool) {
+		t.Errorf("Expected adding %d and %d to yield %d", lhs, rhs, int64(math.MinInt64))
 	}
 }
 
@@ -158,12 +159,42 @@ func TestIntConvertToNative_Any(t *testing.T) {
 }
 
 func TestIntConvertToNative_Error(t *testing.T) {
-	val, err := Int(1).ConvertToNative(jsonStructType)
+	val, err := Int(1).ConvertToNative(JSONStructType)
 	if err == nil {
 		t.Errorf("Got '%v', expected error", val)
 	}
 }
 
+func TestIntConvertToNative_Int8(t *testing.T) {
+	val, err := Int(127).ConvertToNative(reflect.TypeOf(int8(0)))
+	if err != nil {
+		t.Fatalf("Int.ConvertToNative(int8) failed: %v", err)
+	}
+	if val.(int8) != 127 {
+		t.Errorf("Got '%v', expected 20050", val)
+	}
+	val, err = Int(math.MaxInt8 + 1).ConvertToNative(reflect.TypeOf(int8(0)))
+	if err == nil {
+		t.Errorf("(MaxInt+1).ConvertToNative(int8) did not error, got: %v", val)
+	} else if !strings.Contains(err.Error(), "integer overflow") {
+		t.Errorf("ConvertToNative(int8) returned unexpected error: %v, wanted integer overflow", err)
+	}
+}
+func TestIntConvertToNative_Int16(t *testing.T) {
+	val, err := Int(20050).ConvertToNative(reflect.TypeOf(int16(0)))
+	if err != nil {
+		t.Fatalf("Int.ConvertToNative(int16) failed: %v", err)
+	}
+	if val.(int16) != 20050 {
+		t.Errorf("Got '%v', expected 20050", val)
+	}
+	val, err = Int(math.MaxInt16 + 1).ConvertToNative(reflect.TypeOf(int16(0)))
+	if err == nil {
+		t.Errorf("(MaxInt+1).ConvertToNative(int16) did not error, got: %v", val)
+	} else if !strings.Contains(err.Error(), "integer overflow") {
+		t.Errorf("ConvertToNative(int32) returned unexpected error: %v, wanted integer overflow", err)
+	}
+}
 func TestIntConvertToNative_Int32(t *testing.T) {
 	val, err := Int(20050).ConvertToNative(reflect.TypeOf(int32(0)))
 	if err != nil {
@@ -192,7 +223,7 @@ func TestIntConvertToNative_Int64(t *testing.T) {
 
 func TestIntConvertToNative_Json(t *testing.T) {
 	// Value can be represented accurately as a JSON number.
-	val, err := Int(maxIntJSON).ConvertToNative(jsonValueType)
+	val, err := Int(maxIntJSON).ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Error(err)
 	} else if !proto.Equal(val.(proto.Message),
@@ -201,7 +232,7 @@ func TestIntConvertToNative_Json(t *testing.T) {
 	}
 
 	// Value converts to a JSON decimal string.
-	val, err = Int(maxIntJSON + 1).ConvertToNative(jsonValueType)
+	val, err = Int(maxIntJSON + 1).ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Error(err)
 	} else if !proto.Equal(val.(proto.Message), structpb.NewStringValue("9007199254740992")) {
@@ -261,7 +292,7 @@ func TestIntConvertToType(t *testing.T) {
 		name   string
 		in     int64
 		toType ref.Type
-		out    interface{}
+		out    any
 	}{
 		{
 			name:   "IntToType",
@@ -352,7 +383,7 @@ func TestIntDivide(t *testing.T) {
 	if !IsError(Int(1).Divide(Double(-1))) {
 		t.Error("Division permitted without express type-conversion.")
 	}
-	if lhs, rhs := math.MinInt64, -1; !IsError(Int(lhs).Divide(Int(rhs))) {
+	if lhs, rhs := int64(math.MinInt64), int64(-1); !IsError(Int(lhs).Divide(Int(rhs))) {
 		t.Errorf("Expected dividing %d and %d result in overflow.", lhs, rhs)
 	}
 }
@@ -398,12 +429,26 @@ func TestIntEqual(t *testing.T) {
 			b:   Double(math.NaN()),
 			out: False,
 		},
+		{
+			a:   Int(1),
+			b:   String("1"),
+			out: False,
+		},
 	}
 	for _, tc := range tests {
 		got := tc.a.Equal(tc.b)
 		if !reflect.DeepEqual(got, tc.out) {
 			t.Errorf("%v.Equal(%v) got %v, wanted %v", tc.a, tc.b, got, tc.out)
 		}
+	}
+}
+
+func TestIntIsZeroValue(t *testing.T) {
+	if Int(1).IsZeroValue() {
+		t.Error("Int(1).IsZeroValue() returned true, wanted false.")
+	}
+	if !Int(0).IsZeroValue() {
+		t.Error("Int(0).IsZeroValue() returned false, wanted true")
 	}
 }
 
@@ -417,7 +462,7 @@ func TestIntModulo(t *testing.T) {
 	if !IsError(Int(21).Modulo(uintZero)) {
 		t.Error("Modulus permitted between different types without type conversion.")
 	}
-	if lhs, rhs := math.MinInt64, -1; !IsError(Int(lhs).Modulo(Int(rhs))) {
+	if lhs, rhs := int64(math.MinInt64), int64(-1); !IsError(Int(lhs).Modulo(Int(rhs))) {
 		t.Errorf("Expected modulo %d and %d result in overflow.", lhs, rhs)
 	}
 }
@@ -429,25 +474,25 @@ func TestIntMultiply(t *testing.T) {
 	if !IsError(Int(1).Multiply(Double(-4.0))) {
 		t.Error("Multiplication permitted without express type-conversion.")
 	}
-	if lhs, rhs := math.MaxInt64/2, 3; !IsError(Int(lhs).Multiply(Int(rhs))) {
+	if lhs, rhs := int64(math.MaxInt64/2), int64(3); !IsError(Int(lhs).Multiply(Int(rhs))) {
 		t.Errorf("Expected multiplying %d and %d to result in overflow.", lhs, rhs)
 	}
-	if lhs, rhs := math.MinInt64/2, 3; !IsError(Int(lhs).Multiply(Int(rhs))) {
+	if lhs, rhs := int64(math.MinInt64/2), int64(3); !IsError(Int(lhs).Multiply(Int(rhs))) {
 		t.Errorf("Expected multiplying %d and %d to result in overflow.", lhs, rhs)
 	}
-	if lhs, rhs := math.MaxInt64/2, 2; !Int(lhs).Multiply(Int(rhs)).Equal(Int(math.MaxInt64 - 1)).(Bool) {
-		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, math.MaxInt64-1)
+	if lhs, rhs := int64(math.MaxInt64/2), int64(2); !Int(lhs).Multiply(Int(rhs)).Equal(Int(int64(math.MaxInt64 - 1))).(Bool) {
+		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, int64(math.MaxInt64-1))
 	}
-	if lhs, rhs := math.MinInt64/2, 2; !Int(lhs).Multiply(Int(rhs)).Equal(Int(math.MinInt64)).(Bool) {
-		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, math.MinInt64)
+	if lhs, rhs := int64(math.MinInt64/2), int64(2); !Int(lhs).Multiply(Int(rhs)).Equal(Int(int64(math.MinInt64))).(Bool) {
+		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, int64(math.MinInt64))
 	}
-	if lhs, rhs := math.MaxInt64/2, -2; !Int(lhs).Multiply(Int(rhs)).Equal(Int(math.MinInt64 + 2)).(Bool) {
-		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, math.MinInt64+2)
+	if lhs, rhs := int64(math.MaxInt64/2), int64(-2); !Int(lhs).Multiply(Int(rhs)).Equal(Int(int64(math.MinInt64 + 2))).(Bool) {
+		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, int64(math.MinInt64+2))
 	}
-	if lhs, rhs := (math.MinInt64+2)/2, -2; !Int(lhs).Multiply(Int(rhs)).Equal(Int(math.MaxInt64 - 1)).(Bool) {
-		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, math.MaxInt64-1)
+	if lhs, rhs := int64((math.MinInt64+2)/2), int64(-2); !Int(lhs).Multiply(Int(rhs)).Equal(Int(int64(math.MaxInt64 - 1))).(Bool) {
+		t.Errorf("Expected multiplying %d and %d to yield %d", lhs, rhs, int64(math.MaxInt64-1))
 	}
-	if lhs, rhs := math.MinInt64, -1; !IsError(Int(lhs).Multiply(Int(rhs))) {
+	if lhs, rhs := int64(math.MinInt64), int64(-1); !IsError(Int(lhs).Multiply(Int(rhs))) {
 		t.Errorf("Expected multiplying %d and %d result in overflow.", lhs, rhs)
 	}
 }
@@ -456,11 +501,11 @@ func TestIntNegate(t *testing.T) {
 	if !Int(1).Negate().Equal(Int(-1)).(Bool) {
 		t.Error("Negating int value did not succeed")
 	}
-	if v := math.MinInt64; !IsError(Int(v).Negate()) {
+	if v := int64(math.MinInt64); !IsError(Int(v).Negate()) {
 		t.Errorf("Expected negating %d to result in overflow.", v)
 	}
-	if v := math.MaxInt64; !Int(v).Negate().Equal(Int(math.MinInt64 + 1)).(Bool) {
-		t.Errorf("Expected negating %d to yield %d", v, math.MinInt64+1)
+	if v := int64(math.MaxInt64); !Int(v).Negate().Equal(Int(int64(math.MinInt64 + 1))).(Bool) {
+		t.Errorf("Expected negating %d to yield %d", v, int64(math.MinInt64+1))
 	}
 }
 
@@ -471,16 +516,16 @@ func TestIntSubtract(t *testing.T) {
 	if !IsError(Int(1).Subtract(Uint(1))) {
 		t.Error("Subtraction permitted without express type-conversion.")
 	}
-	if lhs, rhs := math.MaxInt64, -1; !IsError(Int(lhs).Subtract(Int(rhs))) {
+	if lhs, rhs := int64(math.MaxInt64), int64(-1); !IsError(Int(lhs).Subtract(Int(rhs))) {
 		t.Errorf("Expected subtracting %d and %d to result in overflow.", lhs, rhs)
 	}
-	if lhs, rhs := math.MinInt64, 1; !IsError(Int(lhs).Subtract(Int(rhs))) {
+	if lhs, rhs := int64(math.MinInt64), int64(1); !IsError(Int(lhs).Subtract(Int(rhs))) {
 		t.Errorf("Expected subtracting %d and %d to result in overflow.", lhs, rhs)
 	}
-	if lhs, rhs := math.MaxInt64-1, -1; !Int(lhs).Subtract(Int(rhs)).Equal(Int(math.MaxInt64)).(Bool) {
-		t.Errorf("Expected subtracting %d and %d to yield %d", lhs, rhs, math.MaxInt64)
+	if lhs, rhs := int64(math.MaxInt64-1), int64(-1); !Int(lhs).Subtract(Int(rhs)).Equal(Int(int64(math.MaxInt64))).(Bool) {
+		t.Errorf("Expected subtracting %d and %d to yield %d", lhs, rhs, int64(math.MaxInt64))
 	}
-	if lhs, rhs := math.MinInt64+1, 1; !Int(lhs).Subtract(Int(rhs)).Equal(Int(math.MinInt64)).(Bool) {
-		t.Errorf("Expected subtracting %d and %d to yield %d", lhs, rhs, math.MinInt64)
+	if lhs, rhs := int64(math.MinInt64+1), int64(1); !Int(lhs).Subtract(Int(rhs)).Equal(Int(int64(math.MinInt64))).(Bool) {
+		t.Errorf("Expected subtracting %d and %d to yield %d", lhs, rhs, int64(math.MinInt64))
 	}
 }

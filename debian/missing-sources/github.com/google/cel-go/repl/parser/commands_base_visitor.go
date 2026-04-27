@@ -1,7 +1,7 @@
-// Code generated from ./Commands.g4 by ANTLR 4.10.1. DO NOT EDIT.
+// Code generated from ./repl/parser/Commands.g4 by ANTLR 4.13.1. DO NOT EDIT.
 
 package parser // Commands
-import "github.com/antlr/antlr4/runtime/Go/antlr"
+import "github.com/antlr4-go/antlr/v4"
 
 type BaseCommandsVisitor struct {
 	*antlr.BaseParseTreeVisitor
@@ -12,6 +12,10 @@ func (v *BaseCommandsVisitor) VisitStartCommand(ctx *StartCommandContext) interf
 }
 
 func (v *BaseCommandsVisitor) VisitCommand(ctx *CommandContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseCommandsVisitor) VisitHelp(ctx *HelpContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -44,6 +48,14 @@ func (v *BaseCommandsVisitor) VisitSimple(ctx *SimpleContext) interface{} {
 }
 
 func (v *BaseCommandsVisitor) VisitEmpty(ctx *EmptyContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseCommandsVisitor) VisitCompile(ctx *CompileContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseCommandsVisitor) VisitParse(ctx *ParseContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -107,7 +119,11 @@ func (v *BaseCommandsVisitor) VisitNegate(ctx *NegateContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseCommandsVisitor) VisitSelectOrCall(ctx *SelectOrCallContext) interface{} {
+func (v *BaseCommandsVisitor) VisitMemberCall(ctx *MemberCallContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseCommandsVisitor) VisitSelect(ctx *SelectContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -119,11 +135,11 @@ func (v *BaseCommandsVisitor) VisitIndex(ctx *IndexContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseCommandsVisitor) VisitCreateMessage(ctx *CreateMessageContext) interface{} {
+func (v *BaseCommandsVisitor) VisitIdent(ctx *IdentContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseCommandsVisitor) VisitIdentOrGlobalCall(ctx *IdentOrGlobalCallContext) interface{} {
+func (v *BaseCommandsVisitor) VisitGlobalCall(ctx *GlobalCallContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -139,6 +155,10 @@ func (v *BaseCommandsVisitor) VisitCreateStruct(ctx *CreateStructContext) interf
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseCommandsVisitor) VisitCreateMessage(ctx *CreateMessageContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseCommandsVisitor) VisitConstantLiteral(ctx *ConstantLiteralContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -147,11 +167,31 @@ func (v *BaseCommandsVisitor) VisitExprList(ctx *ExprListContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseCommandsVisitor) VisitListInit(ctx *ListInitContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseCommandsVisitor) VisitFieldInitializerList(ctx *FieldInitializerListContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseCommandsVisitor) VisitOptField(ctx *OptFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseCommandsVisitor) VisitMapInitializerList(ctx *MapInitializerListContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseCommandsVisitor) VisitSimpleIdentifier(ctx *SimpleIdentifierContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseCommandsVisitor) VisitEscapedIdentifier(ctx *EscapedIdentifierContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseCommandsVisitor) VisitOptExpr(ctx *OptExprContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

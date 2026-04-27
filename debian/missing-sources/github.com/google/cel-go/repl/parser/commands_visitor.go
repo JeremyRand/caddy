@@ -1,7 +1,7 @@
-// Code generated from ./Commands.g4 by ANTLR 4.10.1. DO NOT EDIT.
+// Code generated from ./repl/parser/Commands.g4 by ANTLR 4.13.1. DO NOT EDIT.
 
 package parser // Commands
-import "github.com/antlr/antlr4/runtime/Go/antlr"
+import "github.com/antlr4-go/antlr/v4"
 
 // A complete Visitor for a parse tree produced by CommandsParser.
 type CommandsVisitor interface {
@@ -12,6 +12,9 @@ type CommandsVisitor interface {
 
 	// Visit a parse tree produced by CommandsParser#command.
 	VisitCommand(ctx *CommandContext) interface{}
+
+	// Visit a parse tree produced by CommandsParser#help.
+	VisitHelp(ctx *HelpContext) interface{}
 
 	// Visit a parse tree produced by CommandsParser#let.
 	VisitLet(ctx *LetContext) interface{}
@@ -36,6 +39,12 @@ type CommandsVisitor interface {
 
 	// Visit a parse tree produced by CommandsParser#empty.
 	VisitEmpty(ctx *EmptyContext) interface{}
+
+	// Visit a parse tree produced by CommandsParser#compile.
+	VisitCompile(ctx *CompileContext) interface{}
+
+	// Visit a parse tree produced by CommandsParser#parse.
+	VisitParse(ctx *ParseContext) interface{}
 
 	// Visit a parse tree produced by CommandsParser#exprCmd.
 	VisitExprCmd(ctx *ExprCmdContext) interface{}
@@ -82,8 +91,11 @@ type CommandsVisitor interface {
 	// Visit a parse tree produced by CommandsParser#Negate.
 	VisitNegate(ctx *NegateContext) interface{}
 
-	// Visit a parse tree produced by CommandsParser#SelectOrCall.
-	VisitSelectOrCall(ctx *SelectOrCallContext) interface{}
+	// Visit a parse tree produced by CommandsParser#MemberCall.
+	VisitMemberCall(ctx *MemberCallContext) interface{}
+
+	// Visit a parse tree produced by CommandsParser#Select.
+	VisitSelect(ctx *SelectContext) interface{}
 
 	// Visit a parse tree produced by CommandsParser#PrimaryExpr.
 	VisitPrimaryExpr(ctx *PrimaryExprContext) interface{}
@@ -91,11 +103,11 @@ type CommandsVisitor interface {
 	// Visit a parse tree produced by CommandsParser#Index.
 	VisitIndex(ctx *IndexContext) interface{}
 
-	// Visit a parse tree produced by CommandsParser#CreateMessage.
-	VisitCreateMessage(ctx *CreateMessageContext) interface{}
+	// Visit a parse tree produced by CommandsParser#Ident.
+	VisitIdent(ctx *IdentContext) interface{}
 
-	// Visit a parse tree produced by CommandsParser#IdentOrGlobalCall.
-	VisitIdentOrGlobalCall(ctx *IdentOrGlobalCallContext) interface{}
+	// Visit a parse tree produced by CommandsParser#GlobalCall.
+	VisitGlobalCall(ctx *GlobalCallContext) interface{}
 
 	// Visit a parse tree produced by CommandsParser#Nested.
 	VisitNested(ctx *NestedContext) interface{}
@@ -106,17 +118,35 @@ type CommandsVisitor interface {
 	// Visit a parse tree produced by CommandsParser#CreateStruct.
 	VisitCreateStruct(ctx *CreateStructContext) interface{}
 
+	// Visit a parse tree produced by CommandsParser#CreateMessage.
+	VisitCreateMessage(ctx *CreateMessageContext) interface{}
+
 	// Visit a parse tree produced by CommandsParser#ConstantLiteral.
 	VisitConstantLiteral(ctx *ConstantLiteralContext) interface{}
 
 	// Visit a parse tree produced by CommandsParser#exprList.
 	VisitExprList(ctx *ExprListContext) interface{}
 
+	// Visit a parse tree produced by CommandsParser#listInit.
+	VisitListInit(ctx *ListInitContext) interface{}
+
 	// Visit a parse tree produced by CommandsParser#fieldInitializerList.
 	VisitFieldInitializerList(ctx *FieldInitializerListContext) interface{}
 
+	// Visit a parse tree produced by CommandsParser#optField.
+	VisitOptField(ctx *OptFieldContext) interface{}
+
 	// Visit a parse tree produced by CommandsParser#mapInitializerList.
 	VisitMapInitializerList(ctx *MapInitializerListContext) interface{}
+
+	// Visit a parse tree produced by CommandsParser#SimpleIdentifier.
+	VisitSimpleIdentifier(ctx *SimpleIdentifierContext) interface{}
+
+	// Visit a parse tree produced by CommandsParser#EscapedIdentifier.
+	VisitEscapedIdentifier(ctx *EscapedIdentifierContext) interface{}
+
+	// Visit a parse tree produced by CommandsParser#optExpr.
+	VisitOptExpr(ctx *OptExprContext) interface{}
 
 	// Visit a parse tree produced by CommandsParser#Int.
 	VisitInt(ctx *IntContext) interface{}

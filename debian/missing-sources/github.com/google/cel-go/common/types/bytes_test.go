@@ -17,6 +17,7 @@ package types
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -71,6 +72,23 @@ func TestBytesConvertToNative_ByteSlice(t *testing.T) {
 	}
 }
 
+func TestBytesConvertToNative_ByteArray(t *testing.T) {
+	val, err := Bytes("123").ConvertToNative(reflect.TypeOf([3]byte{}))
+	if err != nil {
+		t.Error("Got unexpected value, wanted []byte{49, 50, 51}", err, val)
+	}
+	if val.([3]byte) != [3]byte{49, 50, 51} {
+		t.Errorf("Got %v, wanted [3]byte{49, 50, 51}", val)
+	}
+}
+
+func TestBytesConvertToNative_ByteArrayError(t *testing.T) {
+	_, err := Bytes("123").ConvertToNative(reflect.TypeOf([1]byte{}))
+	if !strings.Contains(err.Error(), "[3]byte not assignable to [1]byte") {
+		t.Errorf("Got unexpected error %v, wanted not assignable error", err)
+	}
+}
+
 func TestBytesConvertToNative_Error(t *testing.T) {
 	val, err := Bytes("123").ConvertToNative(reflect.TypeOf(""))
 	if err == nil {
@@ -79,7 +97,7 @@ func TestBytesConvertToNative_Error(t *testing.T) {
 }
 
 func TestBytesConvertToNative_Json(t *testing.T) {
-	val, err := Bytes("123").ConvertToNative(jsonValueType)
+	val, err := Bytes("123").ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Error(err)
 	}
@@ -112,6 +130,15 @@ func TestBytesConvertToType(t *testing.T) {
 	}
 	if !IsError(Bytes("hello").ConvertToType(IntType)) {
 		t.Errorf("Got value, expected error")
+	}
+}
+
+func TestBytesIsZeroValue(t *testing.T) {
+	if Bytes("non-zero").IsZeroValue() {
+		t.Error("Bytes('non-zero').IsZeroValue() returned true, wanted false.")
+	}
+	if !Bytes("").IsZeroValue() {
+		t.Error("Bytes('').IsZeroValue() returned false, wanted true")
 	}
 }
 

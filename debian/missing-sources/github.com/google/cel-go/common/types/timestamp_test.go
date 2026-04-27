@@ -59,7 +59,7 @@ func TestTimestampOperators(t *testing.T) {
 	tests := []struct {
 		name string
 		op   func() ref.Val
-		out  interface{}
+		out  any
 	}{
 		// Addition tests.
 		{
@@ -272,12 +272,12 @@ func TestTimestampConvertToNative(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	var want interface{}
+	var want any
 	want = tpb.New(ts.Time)
 	if !proto.Equal(val.(proto.Message), want.(proto.Message)) {
 		t.Errorf("Got '%v', expected '%v'", val, want)
 	}
-	val, err = ts.ConvertToNative(jsonValueType)
+	val, err = ts.ConvertToNative(JSONValueType)
 	if err != nil {
 		t.Error(err)
 	}
@@ -310,6 +310,15 @@ func TestTimestampConvertToNative(t *testing.T) {
 	want = time.Unix(7506, 0).UTC()
 	if !reflect.DeepEqual(val, want) {
 		t.Errorf("got %v wanted %v", val, want)
+	}
+}
+
+func TestTimestampIsZeroValue(t *testing.T) {
+	if (Timestamp{Time: time.Now()}).IsZeroValue() {
+		t.Error("Timestamp(Now()).IsZeroValue() returned true, wanted false.")
+	}
+	if (Timestamp{Time: time.Unix(0, 0)}).IsZeroValue() {
+		t.Error("Timestamp(0).IsZeroValue() returned true, wanted false.")
 	}
 }
 

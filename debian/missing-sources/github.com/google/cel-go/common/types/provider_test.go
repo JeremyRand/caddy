@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +36,7 @@ import (
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-func TestTypeRegistryCopy(t *testing.T) {
+func TestRegistryCopy(t *testing.T) {
 	reg := NewEmptyRegistry()
 	reg2 := reg.Copy()
 	if !reflect.DeepEqual(reg, reg2) {
@@ -47,7 +49,40 @@ func TestTypeRegistryCopy(t *testing.T) {
 	}
 }
 
-func TestTypeRegistryEnumValue(t *testing.T) {
+func TestRegistryRegisterType(t *testing.T) {
+	reg := newTestRegistry(t)
+	err := reg.RegisterType(
+		NewTypeValue("http.Request", traits.ReceiverType),
+		NewObjectType("http.Request", traits.ReceiverType),
+	)
+	if err == nil {
+		t.Error("RegisterType() for differing type definitions with the same name did not fail")
+	}
+}
+
+func TestRegistryRegisterTypeNoConflict(t *testing.T) {
+	reg := newTestRegistry(t)
+	err := reg.RegisterType(
+		NewOpaqueType("http.Request", NewTypeParamType("T")),
+		NewOpaqueType("http.Request", NewTypeParamType("V")),
+	)
+	if err != nil {
+		t.Errorf("RegisterType() failed for equivalent types: %v", err)
+	}
+}
+
+func TestRegistryRegisterTypeConflict(t *testing.T) {
+	reg := newTestRegistry(t)
+	err := reg.RegisterType(
+		NewOpaqueType("http.Request", NewTypeParamType("T"), NewTypeParamType("V")),
+		NewOpaqueType("http.Request", NewTypeParamType("V")),
+	)
+	if err == nil {
+		t.Error("RegisterType() for differing type definitions with the same name did not fail")
+	}
+}
+
+func TestRegistryEnumValue(t *testing.T) {
 	reg := newTestRegistry(t)
 	err := reg.RegisterDescriptor(proto3pb.GlobalEnum_GOO.Descriptor().ParentFile())
 	if err != nil {
@@ -66,103 +101,388 @@ func TestTypeRegistryEnumValue(t *testing.T) {
 	}
 }
 
-func TestTypeRegistryFindType(t *testing.T) {
+func TestRegistryFindStructType(t *testing.T) {
 	reg := newTestRegistry(t)
 	err := reg.RegisterDescriptor(proto3pb.GlobalEnum_GOO.Descriptor().ParentFile())
 	if err != nil {
 		t.Fatalf("RegisterDescriptor() failed: %v", err)
 	}
 	msgTypeName := ".google.expr.proto3.test.TestAllTypes"
-	_, found := reg.FindType(msgTypeName)
+	exprType, found := reg.FindType(msgTypeName)
 	if !found {
 		t.Fatalf("FindType() did not find: %q", msgTypeName)
+	}
+	celType, found := reg.FindStructType(msgTypeName)
+	if !found {
+		t.Fatalf("FindStructType() did not find %q", msgTypeName)
+	}
+	exprConvType, err := ExprTypeToType(exprType)
+	if err != nil {
+		t.Fatalf("ExprTypeToType(%v) failed: %v", exprType, err)
+	}
+	if !exprConvType.IsExactType(celType) {
+		t.Errorf("Got %v type, wanted %v", exprConvType, celType)
 	}
 	_, found = reg.FindType(msgTypeName + "Undefined")
 	if found {
 		t.Fatalf("FindType() found: %q", msgTypeName+"Undefined")
 	}
-	_, found = reg.FindFieldType(msgTypeName, "single_bool")
-	if !found {
-		t.Fatalf("FindFieldType() did not find: %q, %s", msgTypeName, "single_bool")
-	}
-	_, found = reg.FindFieldType(msgTypeName, "double_bool")
+	_, found = reg.FindStructType(msgTypeName + "Undefined")
 	if found {
-		t.Fatalf("FindFieldType() found: %q, %s", msgTypeName, "double_bool")
+		t.Fatalf("FindStructType() found: %q", msgTypeName+"Undefined")
 	}
 }
 
-func TestTypeRegistryNewValue(t *testing.T) {
-	reg := newTestRegistry(t, &exprpb.ParsedExpr{})
-	sourceInfo := reg.NewValue(
-		"google.api.expr.v1alpha1.SourceInfo",
-		map[string]ref.Val{
-			"location":     String("TestTypeRegistryNewValue"),
-			"line_offsets": NewDynamicList(reg, []int64{0, 2}),
-			"positions":    NewDynamicMap(reg, map[int64]int64{1: 2, 2: 4}),
+func TestRegistryFindStructFieldNames(t *testing.T) {
+	reg := newTestRegistry(t, &exprpb.Decl{}, &exprpb.Reference{})
+	tests := []struct {
+		typeName string
+		fields   []string
+	}{
+		{
+			typeName: "google.api.expr.v1alpha1.Reference",
+			fields:   []string{"name", "overload_id", "value"},
+		},
+		{
+			typeName: "google.api.expr.v1alpha1.Decl",
+			fields:   []string{"name", "ident", "function"},
+		},
+		{
+			typeName: "invalid.TypeName",
+			fields:   []string{},
+		},
+	}
+
+	for _, tst := range tests {
+		tc := tst
+		t.Run(fmt.Sprintf("%s", tc.typeName), func(t *testing.T) {
+			fields, _ := reg.FindStructFieldNames(tc.typeName)
+			sort.Strings(fields)
+			sort.Strings(tc.fields)
+			if !reflect.DeepEqual(fields, tc.fields) {
+				t.Errorf("got %v, wanted %v", fields, tc.fields)
+			}
 		})
-	if IsError(sourceInfo) {
-		t.Error(sourceInfo)
-	} else {
-		info := sourceInfo.Value().(proto.Message)
-		srcInfo := &exprpb.SourceInfo{}
-		proto.Merge(srcInfo, info)
-		if srcInfo.Location != "TestTypeRegistryNewValue" ||
-			!reflect.DeepEqual(srcInfo.LineOffsets, []int32{0, 2}) ||
-			!reflect.DeepEqual(srcInfo.Positions, map[int64]int32{1: 2, 2: 4}) {
-			t.Errorf("Source info not properly configured: %v", info)
-		}
 	}
 }
 
-func TestTypeRegistryNewValue_OneofFields(t *testing.T) {
-	reg := newTestRegistry(t, &exprpb.CheckedExpr{}, &exprpb.ParsedExpr{})
-	exp := reg.NewValue(
-		"google.api.expr.v1alpha1.CheckedExpr",
-		map[string]ref.Val{
-			"expr": reg.NewValue(
-				"google.api.expr.v1alpha1.Expr",
-				map[string]ref.Val{
-					"const_expr": reg.NewValue(
-						"google.api.expr.v1alpha1.Constant",
-						map[string]ref.Val{
-							"string_value": String("oneof"),
-						}),
+func TestRegistryFindStructFieldType(t *testing.T) {
+	reg := newTestRegistry(t)
+	err := reg.RegisterDescriptor(proto3pb.GlobalEnum_GOO.Descriptor().ParentFile())
+	if err != nil {
+		t.Fatalf("RegisterDescriptor() failed: %v", err)
+	}
+	msgTypeName := ".google.expr.proto3.test.TestAllTypes"
+	tests := []struct {
+		typeName string
+		field    string
+		found    bool
+	}{
+		{
+			typeName: msgTypeName,
+			field:    "single_bool",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "single_nested_message",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "single_nested_message",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "standalone_enum",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "single_duration",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "single_timestamp",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "single_any",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "single_int64_wrapper",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "repeated_bool",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "map_string_string",
+			found:    true,
+		},
+		{
+			typeName: msgTypeName,
+			field:    "double_bool",
+			found:    false,
+		},
+		{
+			typeName: msgTypeName + "Undefined",
+			field:    "map_string_string",
+			found:    false,
+		},
+	}
+
+	for _, tst := range tests {
+		tc := tst
+		t.Run(fmt.Sprintf("%s.%s", tc.typeName, tc.field), func(t *testing.T) {
+			// When the field is expected to be found, test parity of the results
+			if tc.found {
+				refField, found := reg.FindFieldType(tc.typeName, tc.field)
+				if !found {
+					t.Fatalf("FindFieldType() did not find: %s.%s", tc.typeName, tc.field)
+				}
+				celField, found := reg.FindStructFieldType(tc.typeName, tc.field)
+				if !found {
+					t.Fatalf("FindStructFieldType() found: %s.%s", tc.typeName, tc.field)
+				}
+				convCelFieldType, err := ExprTypeToType(refField.Type)
+				if err != nil {
+					t.Fatalf("ExprTypeToType(%v) failed: %v", refField.Type, err)
+				}
+				if !convCelFieldType.IsExactType(celField.Type) {
+					t.Errorf("Got %v type, wanted %v", convCelFieldType, celField.Type)
+				}
+				return
+			}
+			// When the field is not expected to be round ensure both return not found.
+			if !tc.found {
+				_, found := reg.FindFieldType(tc.typeName, tc.field)
+				if found {
+					t.Errorf("FindFieldType() found: %s.%s", tc.typeName, tc.field)
+				}
+				_, found = reg.FindStructFieldType(tc.typeName, tc.field)
+				if found {
+					t.Errorf("FindStructFieldType() found: %s.%s", tc.typeName, tc.field)
+				}
+			}
+		})
+	}
+}
+
+func TestRegistryNewValue(t *testing.T) {
+	reg := newTestRegistry(t, &proto3pb.TestAllTypes{}, &exprpb.SourceInfo{})
+	tests := []struct {
+		typeName string
+		fields   map[string]ref.Val
+		out      proto.Message
+	}{
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields:   map[string]ref.Val{},
+			out:      &proto3pb.TestAllTypes{},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"standalone_enum": Int(1),
+			},
+			out: &proto3pb.TestAllTypes{
+				StandaloneEnum: proto3pb.TestAllTypes_BAR,
+			},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"single_int32_wrapper": Int(123),
+				"single_int64_wrapper": NullValue,
+			},
+			out: &proto3pb.TestAllTypes{
+				SingleInt32Wrapper: wrapperspb.Int32(123),
+			},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"repeated_int64": reg.NativeToValue([]int64{3, 2, 1}),
+			},
+			out: &proto3pb.TestAllTypes{
+				RepeatedInt64: []int64{3, 2, 1},
+			},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"single_nested_enum": Int(2),
+			},
+			out: &proto3pb.TestAllTypes{
+				NestedType: &proto3pb.TestAllTypes_SingleNestedEnum{
+					SingleNestedEnum: proto3pb.TestAllTypes_BAZ,
+				},
+			},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"single_value": True,
+			},
+			out: &proto3pb.TestAllTypes{
+				SingleValue: structpb.NewBoolValue(true),
+			},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"single_value": reg.NativeToValue([]any{"hello", 10.2}),
+			},
+			out: &proto3pb.TestAllTypes{
+				SingleValue: structpb.NewListValue(
+					&structpb.ListValue{
+						Values: []*structpb.Value{
+							structpb.NewStringValue("hello"),
+							structpb.NewNumberValue(10.2),
+						},
+					},
+				),
+			},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"repeated_nested_message": reg.NativeToValue([]any{
+					&proto3pb.TestAllTypes_NestedMessage{Bb: 123},
 				}),
+			},
+			out: &proto3pb.TestAllTypes{
+				RepeatedNestedMessage: []*proto3pb.TestAllTypes_NestedMessage{{Bb: 123}},
+			},
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"map_int64_nested_type": reg.NativeToValue(map[int64]any{
+					1234: &proto3pb.NestedTestAllTypes{Payload: &proto3pb.TestAllTypes{SingleInt32: 1234}},
+				}),
+			},
+			out: &proto3pb.TestAllTypes{
+				MapInt64NestedType: map[int64]*proto3pb.NestedTestAllTypes{
+					1234: {Payload: &proto3pb.TestAllTypes{SingleInt32: 1234}},
+				},
+			},
+		},
+		{
+			typeName: "google.api.expr.v1alpha1.SourceInfo",
+			fields: map[string]ref.Val{
+				"location":     String("TestRegistryNewValue"),
+				"line_offsets": reg.NativeToValue([]int64{0, 2}),
+				"positions":    reg.NativeToValue(map[int64]int64{1: 2, 2: 4}),
+			},
+			out: &exprpb.SourceInfo{
+				Location:    "TestRegistryNewValue",
+				LineOffsets: []int32{0, 2},
+				Positions:   map[int64]int32{1: 2, 2: 4},
+			},
+		},
+	}
+	for i, tst := range tests {
+		tc := tst
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			out := reg.NewValue(tc.typeName, tc.fields)
+			if IsError(out) {
+				t.Fatalf("reg.NewValue(%s, %v) failed: %v", tc.typeName, tc.fields, out)
+			}
+			if !proto.Equal(tc.out, out.Value().(proto.Message)) {
+				t.Errorf("reg.NewValue() got %v, wanted %v", out, tc.out)
+			}
 		})
-	if IsError(exp) {
-		t.Fatalf("reg.NewValue() creation failed: %v", exp)
-	}
-	e, err := exp.ConvertToNative(reflect.TypeOf(&exprpb.CheckedExpr{}))
-	if err != nil {
-		t.Fatalf("ConvertToNative() failed: %v", err)
-	}
-	ce := e.(*exprpb.CheckedExpr)
-	if ce.GetExpr().GetConstExpr().GetStringValue() != "oneof" {
-		t.Errorf("Expr with oneof could not be created: %v", ce)
 	}
 }
 
-func TestTypeRegistryNewValue_WrapperFields(t *testing.T) {
-	reg := newTestRegistry(t, &proto3pb.TestAllTypes{})
-	exp := reg.NewValue(
-		"google.expr.proto3.test.TestAllTypes",
-		map[string]ref.Val{
-			"single_int32_wrapper": Int(123),
+func TestRegistryNewValueErrors(t *testing.T) {
+	reg := newTestRegistry(t, &proto3pb.TestAllTypes{}, &exprpb.SourceInfo{})
+	tests := []struct {
+		typeName string
+		fields   map[string]ref.Val
+		err      string
+	}{
+		{
+			typeName: "google.expr.proto3.test.TestAllType",
+			fields:   map[string]ref.Val{},
+			err:      "unknown type",
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"undefined": Int(1),
+			},
+			err: "no such field",
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"single_int32_wrapper": True,
+			},
+			err: "type conversion error",
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"repeated_int64": reg.NativeToValue([]float64{1.0, 2.3}),
+			},
+			err: "type conversion error",
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"repeated_int64": Int(10),
+			},
+			err: "unsupported field type",
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"map_string_string": NullValue,
+			},
+			err: "unsupported field type",
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"map_string_string": reg.NativeToValue(map[string]int{"hello": 1}),
+			},
+			err: "type conversion error",
+		},
+		{
+			typeName: "google.expr.proto3.test.TestAllTypes",
+			fields: map[string]ref.Val{
+				"map_string_string": reg.NativeToValue(map[int]int{1: 1}),
+			},
+			err: "type conversion error",
+		},
+	}
+	for i, tst := range tests {
+		tc := tst
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			out := reg.NewValue(tc.typeName, tc.fields)
+			if !IsError(out) {
+				t.Fatalf("reg.NewValue(%s, %v) got %v, wanted error", tc.typeName, tc.fields, out)
+			}
+			err := out.(*Err)
+			if !strings.Contains(err.Error(), tc.err) {
+				t.Errorf("reg.NewValue() got error %v, wanted error %s", err, tc.err)
+			}
 		})
-	if IsError(exp) {
-		t.Fatalf("reg.NewValue() creation failed: %v", exp)
-	}
-	e, err := exp.ConvertToNative(reflect.TypeOf(&proto3pb.TestAllTypes{}))
-	if err != nil {
-		t.Fatalf("ConvertToNative() failed: %v", err)
-	}
-	ce := e.(*proto3pb.TestAllTypes)
-	if ce.GetSingleInt32Wrapper().GetValue() != int32(123) {
-		t.Errorf("single_int32_wrapper value %v not set to 123", ce)
 	}
 }
 
-func TestTypeRegistryGetters(t *testing.T) {
+func TestRegistryGetters(t *testing.T) {
 	reg := newTestRegistry(t, &exprpb.ParsedExpr{})
 	if sourceInfo := reg.NewValue(
 		"google.api.expr.v1alpha1.SourceInfo",
@@ -204,32 +524,32 @@ func TestConvertToNative(t *testing.T) {
 	// Core type conversion tests.
 	expectValueToNative(t, True, true)
 	expectValueToNative(t, True, True)
-	expectValueToNative(t, NewDynamicList(reg, []Bool{True, False}), []interface{}{true, false})
+	expectValueToNative(t, NewDynamicList(reg, []Bool{True, False}), []any{true, false})
 	expectValueToNative(t, NewDynamicList(reg, []Bool{True, False}), []ref.Val{True, False})
 	expectValueToNative(t, Int(-1), int32(-1))
 	expectValueToNative(t, Int(2), int64(2))
 	expectValueToNative(t, Int(-1), Int(-1))
-	expectValueToNative(t, NewDynamicList(reg, []Int{4}), []interface{}{int64(4)})
+	expectValueToNative(t, NewDynamicList(reg, []Int{4}), []any{int64(4)})
 	expectValueToNative(t, NewDynamicList(reg, []Int{5}), []ref.Val{Int(5)})
 	expectValueToNative(t, Uint(3), uint32(3))
 	expectValueToNative(t, Uint(4), uint64(4))
 	expectValueToNative(t, Uint(5), Uint(5))
-	expectValueToNative(t, NewDynamicList(reg, []Uint{4}), []interface{}{uint64(4)})
+	expectValueToNative(t, NewDynamicList(reg, []Uint{4}), []any{uint64(4)})
 	expectValueToNative(t, NewDynamicList(reg, []Uint{5}), []ref.Val{Uint(5)})
 	expectValueToNative(t, Double(5.5), float32(5.5))
 	expectValueToNative(t, Double(-5.5), float64(-5.5))
-	expectValueToNative(t, NewDynamicList(reg, []Double{-5.5}), []interface{}{-5.5})
+	expectValueToNative(t, NewDynamicList(reg, []Double{-5.5}), []any{-5.5})
 	expectValueToNative(t, NewDynamicList(reg, []Double{-5.5}), []ref.Val{Double(-5.5)})
 	expectValueToNative(t, Double(-5.5), Double(-5.5))
 	expectValueToNative(t, String("hello"), "hello")
 	expectValueToNative(t, String("hello"), String("hello"))
 	expectValueToNative(t, NullValue, structpb.NullValue_NULL_VALUE)
 	expectValueToNative(t, NullValue, NullValue)
-	expectValueToNative(t, NewDynamicList(reg, []Null{NullValue}), []interface{}{structpb.NullValue_NULL_VALUE})
+	expectValueToNative(t, NewDynamicList(reg, []Null{NullValue}), []any{structpb.NullValue_NULL_VALUE})
 	expectValueToNative(t, NewDynamicList(reg, []Null{NullValue}), []ref.Val{NullValue})
 	expectValueToNative(t, Bytes("world"), []byte("world"))
 	expectValueToNative(t, Bytes("world"), Bytes("world"))
-	expectValueToNative(t, NewDynamicList(reg, []Bytes{Bytes("hello")}), []interface{}{[]byte("hello")})
+	expectValueToNative(t, NewDynamicList(reg, []Bytes{Bytes("hello")}), []any{[]byte("hello")})
 	expectValueToNative(t, NewDynamicList(reg, []Bytes{Bytes("hello")}), []ref.Val{Bytes("hello")})
 	expectValueToNative(t, NewDynamicList(reg, []int64{1, 2, 3}), []int32{1, 2, 3})
 	expectValueToNative(t, Duration{Duration: time.Duration(500)}, time.Duration(500))
@@ -246,6 +566,21 @@ func TestConvertToNative(t *testing.T) {
 	// Proto conversion tests.
 	parsedExpr := &exprpb.ParsedExpr{}
 	expectValueToNative(t, reg.NativeToValue(parsedExpr), parsedExpr)
+
+	// Custom scalars
+	expectValueToNative(t, Int(1), testInt(1))
+	expectValueToNative(t, Int(1), testInt8(1))
+	expectValueToNative(t, Int(1), testInt16(1))
+	expectValueToNative(t, Int(1), testInt32(1))
+	expectValueToNative(t, Int(1), testInt64(1))
+	expectValueToNative(t, Uint(1), testUint(1))
+	expectValueToNative(t, Uint(1), testUint8(1))
+	expectValueToNative(t, Uint(1), testUint16(1))
+	expectValueToNative(t, Uint(1), testUint32(1))
+	expectValueToNative(t, Uint(1), testUint64(1))
+	expectValueToNative(t, Double(4.5), testFloat32(4.5))
+	expectValueToNative(t, Double(-5.1), testFloat64(-5.1))
+	expectValueToNative(t, String("foo"), testString("foo"))
 }
 
 func TestNativeToValue_Any(t *testing.T) {
@@ -360,22 +695,31 @@ func TestNativeToValue_Wrappers(t *testing.T) {
 	// Wrapper conversion test.
 	expectNativeToValue(t, wrapperspb.Bool(true), True)
 	expectNativeToValue(t, &wrapperspb.BoolValue{}, False)
+	expectNativeToValue(t, (*wrapperspb.BoolValue)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.BytesValue{}, Bytes{})
 	expectNativeToValue(t, wrapperspb.Bytes([]byte("hi")), Bytes("hi"))
+	expectNativeToValue(t, (*wrapperspb.BytesValue)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.DoubleValue{}, Double(0.0))
 	expectNativeToValue(t, wrapperspb.Double(6.4), Double(6.4))
+	expectNativeToValue(t, (*wrapperspb.DoubleValue)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.FloatValue{}, Double(0.0))
 	expectNativeToValue(t, wrapperspb.Float(3.0), Double(3.0))
+	expectNativeToValue(t, (*wrapperspb.FloatValue)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.Int32Value{}, IntZero)
 	expectNativeToValue(t, wrapperspb.Int32(-32), Int(-32))
+	expectNativeToValue(t, (*wrapperspb.Int32Value)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.Int64Value{}, IntZero)
 	expectNativeToValue(t, wrapperspb.Int64(-64), Int(-64))
+	expectNativeToValue(t, (*wrapperspb.Int64Value)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.StringValue{}, String(""))
 	expectNativeToValue(t, wrapperspb.String("hello"), String("hello"))
+	expectNativeToValue(t, (*wrapperspb.StringValue)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.UInt32Value{}, Uint(0))
 	expectNativeToValue(t, wrapperspb.UInt32(32), Uint(32))
+	expectNativeToValue(t, (*wrapperspb.UInt32Value)(nil), NullValue)
 	expectNativeToValue(t, &wrapperspb.UInt64Value{}, Uint(0))
 	expectNativeToValue(t, wrapperspb.UInt64(64), Uint(64))
+	expectNativeToValue(t, (*wrapperspb.UInt64Value)(nil), NullValue)
 }
 
 func TestNativeToValue_Primitive(t *testing.T) {
@@ -393,6 +737,8 @@ func TestNativeToValue_Primitive(t *testing.T) {
 	expectNativeToValue(t, float64(-5.5), Double(-5.5))
 	expectNativeToValue(t, "hello", String("hello"))
 	expectNativeToValue(t, []byte("world"), Bytes("world"))
+	expectNativeToValue(t, [4]byte{1, 2, 3, 4}, Bytes([]byte{1, 2, 3, 4}))
+	expectNativeToValue(t, &[4]byte{1, 2, 3, 4}, Bytes([]byte{1, 2, 3, 4}))
 	expectNativeToValue(t, time.Duration(500), Duration{Duration: time.Duration(500)})
 	expectNativeToValue(t, time.Unix(12345, 0), Timestamp{Time: time.Unix(12345, 0)})
 	expectNativeToValue(t, dpb.New(time.Duration(500)), Duration{Duration: time.Duration(500)})
@@ -438,12 +784,19 @@ func TestNativeToValue_Primitive(t *testing.T) {
 	expectNativeToValue(t, &rBytes, rBytes)
 
 	// Extensions to core types.
+	expectNativeToValue(t, testInt(1), Int(1))
+	expectNativeToValue(t, testInt8(1), Int(1))
+	expectNativeToValue(t, testInt16(1), Int(1))
 	expectNativeToValue(t, testInt32(1), Int(1))
 	expectNativeToValue(t, testInt64(-100), Int(-100))
+	expectNativeToValue(t, testUint(1), Uint(1))
+	expectNativeToValue(t, testUint8(1), Uint(1))
+	expectNativeToValue(t, testUint16(1), Uint(1))
 	expectNativeToValue(t, testUint32(2), Uint(2))
 	expectNativeToValue(t, testUint64(3), Uint(3))
 	expectNativeToValue(t, testFloat32(4.5), Double(4.5))
 	expectNativeToValue(t, testFloat64(-5.1), Double(-5.1))
+	expectNativeToValue(t, testString("foo"), String("foo"))
 
 	// Null conversion test.
 	expectNativeToValue(t, nil, NullValue)
@@ -457,7 +810,7 @@ func TestUnsupportedConversion(t *testing.T) {
 	}
 }
 
-func expectValueToNative(t *testing.T, in ref.Val, out interface{}) {
+func expectValueToNative(t *testing.T, in ref.Val, out any) {
 	t.Helper()
 	if val, err := in.ConvertToNative(reflect.TypeOf(out)); err != nil {
 		t.Error(err)
@@ -475,12 +828,12 @@ func expectValueToNative(t *testing.T, in ref.Val, out interface{}) {
 		}
 		if !equals {
 			t.Errorf("Unexpected conversion from expr to proto.\n"+
-				"expected: %T, actual: %T", val, out)
+				"expected: %T, actual: %T", out, val)
 		}
 	}
 }
 
-func expectNativeToValue(t *testing.T, in interface{}, out ref.Val) {
+func expectNativeToValue(t *testing.T, in any, out ref.Val) {
 	t.Helper()
 	reg := newTestRegistry(t, &exprpb.ParsedExpr{})
 	if val := reg.NativeToValue(in); IsError(val) {
@@ -498,7 +851,7 @@ func BenchmarkNativeToValue(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewRegistry() failed: %v", err)
 	}
-	inputs := []interface{}{
+	inputs := []any{
 		true,
 		false,
 		float32(-1.2),
@@ -550,14 +903,22 @@ func BenchmarkTypeProviderCopy(b *testing.B) {
 type nonConvertible struct {
 	Field string
 }
+type testBool bool
+type testInt int
+type testInt8 int8
+type testInt16 int16
 type testInt32 int32
 type testInt64 int64
+type testUint uint
+type testUint8 uint8
+type testUint16 uint16
 type testUint32 uint32
 type testUint64 uint64
 type testFloat32 float32
 type testFloat64 float64
+type testString string
 
-func newTestRegistry(t *testing.T, types ...proto.Message) ref.TypeRegistry {
+func newTestRegistry(t *testing.T, types ...proto.Message) *Registry {
 	t.Helper()
 	reg, err := NewRegistry(types...)
 	if err != nil {
