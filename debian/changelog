@@ -1,3 +1,13 @@
+caddy (2.11.2-2) UNRELEASED; urgency=medium
+
+  [ Nilesh Patra ]
+  * Switch to regular salsa CI
+
+  [ Pirate Praveen ]
+  * Update minimum versions of Build-Deps (Closes: #1136666)
+
+ -- Pirate Praveen <praveen@debian.org>  Mon, 01 Jun 2026 15:05:34 +0530
+
 caddy (2.11.2-1) unstable; urgency=medium
 
   * Team Upload.
