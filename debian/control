@@ -5,7 +5,7 @@ Section: httpd
 Testsuite: autopkgtest-pkg-go
 Build-Depends: debhelper-compat (= 13),
                dh-golang,
-               golang-any (>= 2:1.26~),
+               golang-go (>= 2:1.26~) | golang-any (>= 2:1.26~),
                golang-cel-expr-dev,
                golang-github-masterminds-sprig-dev,
                golang-github-alecthomas-chroma-v2-dev,
